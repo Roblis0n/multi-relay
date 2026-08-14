@@ -15,9 +15,6 @@
     <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
       <path d="M0 0L10 5L0 10Z" fill="#8495ad"/>
     </marker>
-    <marker id="arrowWarning" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0 0L10 5L0 10Z" fill="#f2b84b"/>
-    </marker>
 
   </defs>
   <rect width="1600" height="780" rx="30" fill="#08111f"/>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.png" width="100%" alt="ChatGPT 与 DeepSeek 通过 Codex DeepSeek Relay 协作">
+  <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务经本机 Relay 原生扇出到 8 个 DeepSeek 子代理">
 </p>
 
 <h1 align="center">Codex DeepSeek Relay</h1>

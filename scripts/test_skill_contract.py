@@ -154,6 +154,11 @@ class SkillContractTests(unittest.TestCase):
 
         self.assertIn('./assets/readme/hero.png', readme)
         self.assertNotIn('./assets/readme/hero.svg', readme)
+        self.assertIn(
+            'alt="Codex 父任务经本机 Relay 原生扇出到 8 个 DeepSeek 子代理"',
+            readme,
+        )
+        self.assertNotIn('alt="ChatGPT', readme)
         self.assertTrue(hero.is_file())
         header = hero.read_bytes()[:24]
         self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")

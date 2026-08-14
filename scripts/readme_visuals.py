@@ -58,9 +58,6 @@ def _document(
     <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
       <path d="M0 0L10 5L0 10Z" fill="{PALETTE["muted"]}"/>
     </marker>
-    <marker id="arrowWarning" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0 0L10 5L0 10Z" fill="{PALETTE["warning"]}"/>
-    </marker>
 {defs}
   </defs>
   {body}
@@ -401,6 +398,9 @@ def workflow_svg() -> str:
         "Relay setup and verification workflow",
         "Credential storage, DeepSeek model probing, transactional installation, native eight-way fan-out, verification, and automatic rollback.",
         body,
+        defs=f"""    <marker id="arrowWarning" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="{PALETTE["warning"]}"/>
+    </marker>""",
     )
 
 
@@ -483,7 +483,11 @@ def write_svg_assets(output_dir: Path) -> dict[str, Path]:
 
 def read_png_size(path: Path) -> tuple[int, int]:
     header = path.read_bytes()[:24]
-    if len(header) != 24 or header[:8] != PNG_SIGNATURE:
+    if (
+        len(header) != 24
+        or header[:8] != PNG_SIGNATURE
+        or header[8:16] != b"\x00\x00\x00\rIHDR"
+    ):
         raise ValueError(f"README asset is not a valid PNG: {path}")
     return struct.unpack(">II", header[16:24])
 

@@ -35,6 +35,8 @@ EXPECTED_PALETTE = {
     "failure": "#ef6a72",
 }
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def elements_with(root: ET.Element, key: str, value: str) -> list[ET.Element]:
     return [node for node in root.iter() if node.attrib.get(key) == value]
@@ -75,6 +77,26 @@ class ReadmeVisualTests(unittest.TestCase):
                 self.assertEqual(
                     root.attrib["viewBox"], f"0 0 {width} {height}"
                 )
+
+    def test_committed_svgs_exactly_match_the_generator(self) -> None:
+        with tempfile.TemporaryDirectory() as output_dir:
+            generated = write_svg_assets(Path(output_dir))
+            for name, generated_path in generated.items():
+                committed_path = ROOT / "assets" / "readme" / name
+                self.assertEqual(
+                    committed_path.read_bytes(), generated_path.read_bytes(), name
+                )
+
+    def test_warning_and_failure_colors_keep_their_semantic_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as output_dir:
+            paths = write_svg_assets(Path(output_dir))
+            for name, path in paths.items():
+                svg = path.read_text(encoding="utf-8")
+                if name == "workflow.svg":
+                    self.assertIn(PALETTE["warning"], svg)
+                else:
+                    self.assertNotIn(PALETTE["warning"], svg, name)
+                self.assertNotIn(PALETTE["failure"], svg, name)
 
     def test_hero_and_architecture_show_exactly_eight_role_slots(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -164,6 +186,14 @@ class ReadmeVisualTests(unittest.TestCase):
                 validate_png(path, (1280, 640))
 
             path.write_bytes(b"not a png")
+            with self.assertRaisesRegex(ValueError, "valid PNG"):
+                read_png_size(path)
+
+            path.write_bytes(
+                b"\x89PNG\r\n\x1a\n"
+                + b"\x00\x00\x00\rXXXX"
+                + struct.pack(">II", 1800, 620)
+            )
             with self.assertRaisesRegex(ValueError, "valid PNG"):
                 read_png_size(path)
 
