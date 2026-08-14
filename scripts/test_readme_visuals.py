@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import re
 import struct
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.readme_visuals import (
     ASSET_SPECS,
@@ -35,9 +42,6 @@ EXPECTED_PALETTE = {
     "failure": "#ef6a72",
 }
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def elements_with(root: ET.Element, key: str, value: str) -> list[ET.Element]:
     return [node for node in root.iter() if node.attrib.get(key) == value]
 
@@ -46,9 +50,24 @@ def visible_text(root: ET.Element) -> str:
     return " ".join(part.strip() for part in root.itertext() if part.strip())
 
 
-def png_header(width: int, height: int) -> bytes:
-    return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(
-        ">II", width, height
+def png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    checksum = zlib.crc32(chunk_type)
+    checksum = zlib.crc32(payload, checksum) & 0xFFFFFFFF
+    return (
+        struct.pack(">I", len(payload))
+        + chunk_type
+        + payload
+        + struct.pack(">I", checksum)
+    )
+
+
+def png_file(width: int, height: int) -> bytes:
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", ihdr)
+        + png_chunk(b"IDAT", zlib.compress(b""))
+        + png_chunk(b"IEND", b"")
     )
 
 
@@ -86,6 +105,12 @@ class ReadmeVisualTests(unittest.TestCase):
                 self.assertEqual(
                     committed_path.read_bytes(), generated_path.read_bytes(), name
                 )
+
+    def test_asset_specs_are_enforced_by_the_generator(self) -> None:
+        with tempfile.TemporaryDirectory() as output_dir:
+            with mock.patch.dict(ASSET_SPECS, {"hero.svg": (1, 1)}):
+                with self.assertRaisesRegex(ValueError, "hero.svg"):
+                    write_svg_assets(Path(output_dir))
 
     def test_warning_and_failure_colors_keep_their_semantic_scope(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -140,6 +165,8 @@ class ReadmeVisualTests(unittest.TestCase):
                 self.assertIn(label, architecture_text)
             for label in ("VERIFY", "ROLLBACK", "MODEL PROBE", "TRANSACTION"):
                 self.assertIn(label, workflow_text)
+            self.assertIn("system credential store", workflow_text)
+            self.assertNotIn("system keychain", workflow_text)
 
     def test_generated_svgs_never_embed_vendor_images(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -178,7 +205,8 @@ class ReadmeVisualTests(unittest.TestCase):
     def test_png_dimension_reader_and_validator(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             path = Path(output_dir) / "asset.png"
-            path.write_bytes(png_header(1800, 620))
+            valid_png = png_file(1800, 620)
+            path.write_bytes(valid_png)
 
             self.assertEqual(read_png_size(path), (1800, 620))
             validate_png(path, (1800, 620))
@@ -189,13 +217,21 @@ class ReadmeVisualTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "valid PNG"):
                 read_png_size(path)
 
-            path.write_bytes(
-                b"\x89PNG\r\n\x1a\n"
-                + b"\x00\x00\x00\rXXXX"
-                + struct.pack(">II", 1800, 620)
-            )
-            with self.assertRaisesRegex(ValueError, "valid PNG"):
-                read_png_size(path)
+            corrupted_cases = {
+                "truncated": valid_png[:24],
+                "missing-iend": valid_png[:-12],
+                "bad-crc": valid_png[:-1] + bytes((valid_png[-1] ^ 1,)),
+                "wrong-first-chunk": (
+                    b"\x89PNG\r\n\x1a\n"
+                    + b"\x00\x00\x00\rXXXX"
+                    + struct.pack(">II", 1800, 620)
+                ),
+            }
+            for case, payload in corrupted_cases.items():
+                with self.subTest(case=case):
+                    path.write_bytes(payload)
+                    with self.assertRaisesRegex(ValueError, "valid PNG"):
+                        read_png_size(path)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -341,7 +342,7 @@ def architecture_svg() -> str:
 
 def workflow_svg() -> str:
     steps = (
-        ("01", "CREDENTIAL", "system keychain", "NO KEY IN LOGS"),
+        ("01", "CREDENTIAL", "system credential store", "NO KEY IN LOGS"),
         ("02", "MODEL PROBE", "deepseek-v4-pro", "HIGHEST EFFORT"),
         ("03", "TRANSACTION", "atomic install", "BACKUP FIRST"),
         ("04", "NATIVE FAN-OUT", "default • worker • explorer", "8-WAY FAN-OUT"),
@@ -473,23 +474,113 @@ def write_svg_assets(output_dir: Path) -> dict[str, Path]:
         "social-preview.svg": social_preview_svg,
         "relay-mark.svg": relay_mark_svg,
     }
+    missing_specs = set(builders).difference(ASSET_SPECS)
+    missing_builders = set(ASSET_SPECS).difference(builders)
+    if missing_specs or missing_builders:
+        details = []
+        if missing_specs:
+            details.append(f"missing specs: {', '.join(sorted(missing_specs))}")
+        if missing_builders:
+            details.append(f"missing generators: {', '.join(sorted(missing_builders))}")
+        raise ValueError(f"README SVG registry mismatch ({'; '.join(details)})")
+
     written: dict[str, Path] = {}
     for name, builder in builders.items():
+        width, height = ASSET_SPECS[name]
+        svg = builder()
+        expected_geometry = (
+            f'width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}"'
+        )
+        if expected_geometry not in svg.partition("\n")[0]:
+            raise ValueError(
+                f"README SVG does not match its declared dimensions: {name}"
+            )
         path = output_dir / name
-        path.write_text(builder(), encoding="utf-8", newline="\n")
+        path.write_text(svg, encoding="utf-8", newline="\n")
         written[name] = path
     return written
 
 
 def read_png_size(path: Path) -> tuple[int, int]:
-    header = path.read_bytes()[:24]
-    if (
-        len(header) != 24
-        or header[:8] != PNG_SIGNATURE
-        or header[8:16] != b"\x00\x00\x00\rIHDR"
-    ):
+    payload = path.read_bytes()
+
+    def invalid() -> None:
         raise ValueError(f"README asset is not a valid PNG: {path}")
-    return struct.unpack(">II", header[16:24])
+
+    if not payload.startswith(PNG_SIGNATURE):
+        invalid()
+
+    offset = len(PNG_SIGNATURE)
+    chunk_index = 0
+    width: int | None = None
+    height: int | None = None
+    saw_idat = False
+    saw_iend = False
+    idat_closed = False
+
+    while offset < len(payload):
+        if len(payload) - offset < 12:
+            invalid()
+        chunk_length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        chunk_type = payload[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + chunk_length
+        crc_end = data_end + 4
+        if crc_end > len(payload):
+            invalid()
+
+        chunk_data = payload[data_start:data_end]
+        expected_crc = struct.unpack(">I", payload[data_end:crc_end])[0]
+        actual_crc = zlib.crc32(chunk_type)
+        actual_crc = zlib.crc32(chunk_data, actual_crc) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            invalid()
+
+        if chunk_index == 0:
+            if chunk_type != b"IHDR" or chunk_length != 13:
+                invalid()
+            width, height, bit_depth, color_type, compression, filtering, interlace = (
+                struct.unpack(">IIBBBBB", chunk_data)
+            )
+            valid_bit_depths = {
+                0: {1, 2, 4, 8, 16},
+                2: {8, 16},
+                3: {1, 2, 4, 8},
+                4: {8, 16},
+                6: {8, 16},
+            }
+            if (
+                width == 0
+                or height == 0
+                or bit_depth not in valid_bit_depths.get(color_type, set())
+                or compression != 0
+                or filtering != 0
+                or interlace not in {0, 1}
+            ):
+                invalid()
+        elif chunk_type == b"IHDR":
+            invalid()
+
+        if chunk_type == b"IDAT":
+            if idat_closed:
+                invalid()
+            saw_idat = True
+        elif saw_idat and chunk_type != b"IEND":
+            idat_closed = True
+
+        if chunk_type == b"IEND":
+            if chunk_length != 0 or not saw_idat or crc_end != len(payload):
+                invalid()
+            saw_iend = True
+            break
+
+        offset = crc_end
+        chunk_index += 1
+
+    if width is None or height is None or not saw_iend:
+        invalid()
+    return width, height
 
 
 def validate_png(path: Path, expected: tuple[int, int]) -> None:
