@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="620" viewBox="0 0 1800 620" role="img" aria-labelledby="title desc">
+  <title id="title">Codex DeepSeek Relay</title>
+  <desc id="desc">A Codex parent task crosses an audited local relay and fans out to eight verified DeepSeek child slots.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#8495ad" stroke-width="1" opacity=".05"/>
+    </pattern>
+    <radialGradient id="relayGlow">
+      <stop offset="0" stop-color="#4d6bfe" stop-opacity=".10"/>
+      <stop offset="1" stop-color="#4d6bfe" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="arrowRoute" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#4d6bfe"/>
+    </marker>
+    <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#8495ad"/>
+    </marker>
+    <marker id="arrowWarning" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#f2b84b"/>
+    </marker>
+
+  </defs>
+  <rect width="1800" height="620" rx="30" fill="#08111f"/>
+<rect x="1" y="1" width="1798" height="618" rx="29" fill="none" stroke="#8495ad" stroke-opacity=".22"/>
+<g transform="translate(72 58)">
+  <rect width="232" height="34" rx="17" fill="#42d392" opacity=".12" stroke="#42d392" stroke-opacity=".45"/>
+  <circle cx="18" cy="17" r="4" fill="#42d392"/>
+  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">LOCAL • AUDITED • NATIVE</text>
+</g>
+<text x="72" y="158" fill="#edf3fb" font-size="56" font-weight="740" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-1.2">Codex DeepSeek</text>
+<text x="72" y="222" fill="#4d6bfe" font-size="72" font-weight="780" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-1.5">Relay</text>
+<text x="74" y="275" fill="#edf3fb" font-size="23" font-weight="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start">Native DeepSeek fan-out for Codex.</text>
+<text x="74" y="309" fill="#8495ad" font-size="19" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">One protected handoff. Eight verified child slots.</text>
+<path d="M74 360H674" stroke="#8495ad" stroke-opacity=".22"/>
+<circle cx="82" cy="400" r="5" fill="#4d6bfe"/>
+<text x="104" y="407" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Parent model stays unchanged</text>
+<circle cx="82" cy="444" r="5" fill="#4d6bfe"/>
+<text x="104" y="451" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Exact task text is handed off visibly</text>
+<circle cx="82" cy="488" r="5" fill="#42d392"/>
+<text x="104" y="495" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Any failed gate rolls back cleanly</text>
+<text x="74" y="558" fill="#8495ad" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.4">codex-deepseek-relay</text>
+<rect x="900" y="44" width="828" height="532" rx="26" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
+<rect x="900" y="44" width="828" height="532" rx="26" fill="url(#grid)"/>
+<text x="940" y="82" fill="#42d392" font-size="14" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.3">SIGNAL MAP // READY</text>
+<text x="1688" y="82" fill="#4d6bfe" font-size="14" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1">NATIVE FAN-OUT ×8</text>
+<circle cx="1306" cy="309" r="158" fill="url(#relayGlow)"/>
+<g transform="translate(944 257)">
+  <rect width="178" height="104" rx="18" fill="#08111f" stroke="#8495ad" stroke-opacity=".35"/>
+  <text x="22" y="36" fill="#edf3fb" font-size="17" font-weight="720" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">CODEX HOST</text>
+  <text x="22" y="65" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">PARENT MODEL</text>
+  <circle cx="150" cy="52" r="10" fill="#4d6bfe" opacity=".18"/>
+  <circle cx="150" cy="52" r="4" fill="#4d6bfe"/>
+</g>
+<path d="M1122 309H1213" fill="none" stroke="#4d6bfe" stroke-width="4" marker-end="url(#arrowRoute)"/>
+<text x="1168" y="286" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.8">AUDITED HANDOFF</text>
+<g transform="translate(1230 220)" data-component="relay-mark" aria-label="Relay core with one input and eight outputs">
+  <rect x="18" y="10" width="114" height="158" rx="18" fill="#08111f" stroke="#4d6bfe" stroke-width="2"/>
+  <path d="M0 89H87" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>
+  <path d="M87 24V154" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>
+  <path d="M87 24H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="24" r="5" fill="#42d392"/>
+  <path d="M87 42.5714H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="42.5714" r="5" fill="#42d392"/>
+  <path d="M87 61.1429H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="61.1429" r="5" fill="#42d392"/>
+  <path d="M87 79.7143H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="79.7143" r="5" fill="#42d392"/>
+  <path d="M87 98.2857H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="98.2857" r="5" fill="#42d392"/>
+  <path d="M87 116.857H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="116.857" r="5" fill="#42d392"/>
+  <path d="M87 135.429H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="135.429" r="5" fill="#42d392"/>
+  <path d="M87 154H140" fill="none" stroke="#4d6bfe" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="140" cy="154" r="5" fill="#42d392"/>
+  <circle cx="0" cy="89" r="6" fill="#4d6bfe"/>
+</g>
+<text x="1305" y="427" fill="#edf3fb" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.9">LOCAL LOOPBACK</text>
+<text x="1305" y="451" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.4">127.0.0.1:42137</text>
+<path d="M1380 309H1490M1490 141V491" fill="none" stroke="#4d6bfe" stroke-width="3" stroke-linecap="round"/>
+<path d="M1490 141H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 191H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 241H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 291H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 341H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 391H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 441H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<path d="M1490 491H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
+<g transform="translate(1520 124)" data-node="child" data-role="default">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">01  default</text>
+</g>
+<g transform="translate(1520 174)" data-node="child" data-role="default">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">02  default</text>
+</g>
+<g transform="translate(1520 224)" data-node="child" data-role="worker">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">03  worker</text>
+</g>
+<g transform="translate(1520 274)" data-node="child" data-role="worker">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">04  worker</text>
+</g>
+<g transform="translate(1520 324)" data-node="child" data-role="worker">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">05  worker</text>
+</g>
+<g transform="translate(1520 374)" data-node="child" data-role="explorer">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">06  explorer</text>
+</g>
+<g transform="translate(1520 424)" data-node="child" data-role="explorer">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">07  explorer</text>
+</g>
+<g transform="translate(1520 474)" data-node="child" data-role="explorer">
+  <rect width="186" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <circle cx="18" cy="17" r="5" fill="#42d392"/>
+  <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">08  explorer</text>
+</g>
+<text x="940" y="548" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.7">RESPONSES → RELAY → CHAT COMPLETIONS</text>
+<text x="1688" y="548" fill="#42d392" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1.2">VERIFIED</text>
+</svg>
