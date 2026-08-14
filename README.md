@@ -6,7 +6,7 @@
 
 <p align="center">把 Codex 的原生子代理路由到 DeepSeek，并保留可审计的任务交接与执行轨迹。</p>
 
-把 Codex 内置的 `default`、`worker`、`explorer` 子代理路由到经在线验证的 `deepseek-v4-pro`，默认允许 8 路并发。主任务继续使用你原来的 OpenAI 模型与最高思考强度。
+本机回环适配层把 Codex Responses 转为 DeepSeek Chat Completions，让 `default`、`worker`、`explorer` 三个内置角色全部路由到经在线验证的 `deepseek-v4-pro`，默认允许 8 路并发（8-way fan-out）；主任务继续使用原来的 OpenAI 模型与最高思考强度。
 
 ## 能得到什么
 
@@ -23,7 +23,11 @@
 - 可随时 disable、enable 或完整 uninstall。
 
 <p align="center">
-  <img src="./assets/readme/workflow.svg" width="100%" alt="DeepSeek fan-out 配置与验收流程">
+  <img src="./assets/readme/architecture.svg" width="100%" alt="架构图：Codex 父任务经受保护的可见交接进入本地 Relay，再原生扇出到 default、worker、explorer 三个角色的 8 个 DeepSeek 子代理">
+</p>
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="DeepSeek 子代理安装的验证与回滚流程：凭据写入、模型探测、事务式安装与原生验收，任何失败自动回滚">
 </p>
 
 ## 快速开始

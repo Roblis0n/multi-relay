@@ -25,6 +25,10 @@ git push -u origin main
 ## 上传后核对
 
 1. GitHub Actions 的 Windows 与 macOS 两个测试任务均通过；
-2. README 顶部图片、工作流图和本地文档链接正常显示；
+2. README 顶部图片、架构图、工作流图、Relay 标志和本地文档链接正常显示；上传核对覆盖 `assets/readme/hero.png`、`assets/readme/architecture.svg`、`assets/readme/workflow.svg`、`assets/readme/relay-mark.svg` 与 `assets/readme/social-preview.png`；
 3. 仓库中不存在 `.env`、`auth.json`、API Key、日志、缓存、备份或压缩包；
 4. 仓库根目录直接包含 `README.md`、`LICENSE`、`.github`、`codex-deepseek-subagent` 和 `scripts`，没有多余的外层目录。
+
+## 设置社交预览图
+
+首次 push 后，在 GitHub 仓库的 `Settings → General → Social preview` 中上传 `assets/readme/social-preview.png`，仓库卡片与分享链接会直接使用这张图。

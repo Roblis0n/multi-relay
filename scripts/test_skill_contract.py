@@ -172,5 +172,23 @@ class SkillContractTests(unittest.TestCase):
         self.assertNotRegex(visual_text, r"[閰鍑瀛绱楠锛銆]{3,}")
 
 
+    def test_readme_local_images_resolve(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        references = re.findall(r'src="(\./[^"]+)"', readme)
+        self.assertTrue(references, "README must reference at least one local image")
+
+        resolved = {}
+        for reference in references:
+            resolved[(ROOT / reference).name] = (ROOT / reference).resolve()
+
+        self.assertIn("architecture.svg", resolved)
+        self.assertIn("workflow.svg", resolved)
+        for name, target in resolved.items():
+            with self.subTest(name=name):
+                self.assertTrue(
+                    target.is_file(), f"README image missing on disk: {target}"
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
