@@ -1,3 +1,5 @@
+**简体中文** | [English](./README_EN.md)
+
 <p align="center">
   <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务经本机 Relay 原生扇出到 8 个 DeepSeek 子代理">
 </p>

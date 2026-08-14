@@ -141,6 +141,33 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn("Roblis0n/codex-deepseek-relay", text)
             self.assertNotIn(legacy_public_repo, text)
         self.assertIn("`codex-deepseek-relay`", upload_guide)
+        self.assertIn(
+            "A local relay routing Codex's native subagent fan-out to DeepSeek, "
+            "with verified setup and transactional rollback.",
+            upload_guide,
+        )
+
+    def test_bilingual_readmes_are_complete_and_cross_linked(self) -> None:
+        chinese = (ROOT / "README.md").read_text(encoding="utf-8")
+        english_path = ROOT / "README_EN.md"
+        self.assertTrue(english_path.is_file(), "English README is missing")
+        english = english_path.read_text(encoding="utf-8")
+
+        self.assertIn("[English](./README_EN.md)", chinese)
+        self.assertIn("[简体中文](./README.md) | English", english)
+        for required in (
+            "Codex DeepSeek Relay",
+            "deepseek-v4-pro",
+            "multi_agent_v2",
+            'fork_turns="none"',
+            "127.0.0.1:42137",
+            "Windows Credential Manager",
+            "macOS Keychain",
+            "uninstall --remove-credential --json",
+            "MIT",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, english)
 
     def test_readme_visuals_use_generated_hero_and_describe_fanout(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -178,21 +205,25 @@ class SkillContractTests(unittest.TestCase):
 
 
     def test_readme_local_images_resolve(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        references = re.findall(r'src="(\./[^"]+)"', readme)
-        self.assertTrue(references, "README must reference at least one local image")
-
-        resolved = {}
-        for reference in references:
-            resolved[(ROOT / reference).name] = (ROOT / reference).resolve()
-
-        self.assertIn("architecture.svg", resolved)
-        self.assertIn("workflow.svg", resolved)
-        for name, target in resolved.items():
-            with self.subTest(name=name):
+        for readme_name in ("README.md", "README_EN.md"):
+            with self.subTest(readme=readme_name):
+                readme = (ROOT / readme_name).read_text(encoding="utf-8")
+                references = re.findall(r'src="(\./[^"]+)"', readme)
                 self.assertTrue(
-                    target.is_file(), f"README image missing on disk: {target}"
+                    references, f"{readme_name} must reference local images"
                 )
+
+                resolved = {
+                    (ROOT / reference).name: (ROOT / reference).resolve()
+                    for reference in references
+                }
+                self.assertIn("architecture.svg", resolved)
+                self.assertIn("workflow.svg", resolved)
+                for name, target in resolved.items():
+                    with self.subTest(readme=readme_name, image=name):
+                        self.assertTrue(
+                            target.is_file(), f"README image missing on disk: {target}"
+                        )
 
 
 if __name__ == "__main__":

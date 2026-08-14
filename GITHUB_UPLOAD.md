@@ -2,6 +2,14 @@
 
 本目录已经整理为单一 Git 仓库根目录，公开仓库名使用 `codex-deepseek-relay`；内部 Skill 目录继续使用 `codex-deepseek-subagent`，以保持安装兼容。
 
+## 仓库 Description
+
+在 GitHub 仓库的 About 区域填写：
+
+```text
+A local relay routing Codex's native subagent fan-out to DeepSeek, with verified setup and transactional rollback.
+```
+
 ## 已完成的准备
 
 - 完整源码、Skill、说明文档、测试和 GitHub Actions 均位于本目录；
@@ -25,9 +33,9 @@ git push -u origin main
 ## 上传后核对
 
 1. GitHub Actions 的 Windows 与 macOS 两个测试任务均通过；
-2. README 顶部图片、架构图、工作流图、Relay 标志和本地文档链接正常显示；上传核对覆盖 `assets/readme/hero.png`、`assets/readme/architecture.svg`、`assets/readme/workflow.svg`、`assets/readme/relay-mark.svg` 与 `assets/readme/social-preview.png`；
+2. 中英文 README 的语言切换、顶部图片、架构图、工作流图、Relay 标志和本地文档链接正常显示；上传核对覆盖 `README.md`、`README_EN.md`、`assets/readme/hero.png`、`assets/readme/architecture.svg`、`assets/readme/workflow.svg`、`assets/readme/relay-mark.svg` 与 `assets/readme/social-preview.png`；
 3. 仓库中不存在 `.env`、`auth.json`、API Key、日志、缓存、备份或压缩包；
-4. 仓库根目录直接包含 `README.md`、`LICENSE`、`.github`、`codex-deepseek-subagent` 和 `scripts`，没有多余的外层目录。
+4. 仓库根目录直接包含 `README.md`、`README_EN.md`、`LICENSE`、`.github`、`codex-deepseek-subagent` 和 `scripts`，没有多余的外层目录。
 
 ## 设置社交预览图
 
