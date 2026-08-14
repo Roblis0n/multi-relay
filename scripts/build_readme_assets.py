@@ -1,67 +1,30 @@
 #!/usr/bin/env python3
-"""使用官方品牌图片生成 DeepSeek fan-out README SVG。"""
+"""验证 ImageGen 主图并生成 DeepSeek fan-out 工作流 SVG。"""
 
 from __future__ import annotations
 
-import base64
+import struct
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets" / "readme"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def png_data(path: Path) -> str:
-    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
+def validate_generated_hero(path: Path) -> tuple[int, int]:
+    """确保不可重建的 ImageGen 主图存在且适合作为宽幅 README 头图。"""
+    header = path.read_bytes()[:24]
+    if len(header) != 24 or header[:8] != PNG_SIGNATURE:
+        raise ValueError(f"README hero is not a valid PNG: {path}")
 
+    width, height = struct.unpack(">II", header[16:24])
+    if width < 1200:
+        raise ValueError(f"README hero must be at least 1200 px wide: {width}")
+    if width / height < 2.5:
+        raise ValueError(f"README hero must be panoramic: {width}x{height}")
+    return width, height
 
-codex = png_data(ASSETS / "brand" / "codex-official.png")
-deepseek = png_data(ASSETS / "brand" / "deepseek-official.png")
-
-hero = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
-  <title id="title">codex-deepseek-subagent</title>
-  <desc id="desc">将 Codex 内置角色路由到 DeepSeek，并验证 8-way fan-out。</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#090C16"/>
-      <stop offset="1" stop-color="#111B32"/>
-    </linearGradient>
-    <linearGradient id="route" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#6C63FF"/>
-      <stop offset="1" stop-color="#4D6BFE"/>
-    </linearGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="12"/>
-    </filter>
-  </defs>
-  <rect width="1200" height="420" rx="30" fill="url(#bg)"/>
-  <circle cx="1070" cy="80" r="120" fill="#4D6BFE" opacity=".10" filter="url(#soft)"/>
-  <path d="M62 71H1138" stroke="#8FA3C8" stroke-opacity=".18"/>
-
-  <g transform="translate(62 47)">
-    <text x="0" y="0" fill="#9AAACA" font-size="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">NATIVE DEEPSEEK FAN-OUT FOR CODEX</text>
-    <text x="0" y="88" fill="#FFFFFF" font-size="58" font-weight="760" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif">codex-deepseek</text>
-    <text x="0" y="148" fill="#B8C6E4" font-size="31" font-weight="620" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif">8-way fan-out</text>
-    <text x="0" y="205" fill="#C7D1E8" font-size="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif">default · worker · explorer</text>
-  </g>
-
-  <g transform="translate(648 76)">
-    <rect x="0" y="0" width="488" height="272" rx="26" fill="#0B1020" stroke="#2B3B60"/>
-    <image href="{codex}" x="26" y="34" width="128" height="128"/>
-    <text x="90" y="183" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">Codex</text>
-    <path d="M164 98H310" stroke="url(#route)" stroke-width="5" stroke-linecap="round"/>
-    <path d="M298 86L312 98L298 110" fill="none" stroke="#4D6BFE" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="172" y="118" width="130" height="36" rx="18" fill="#151E36" stroke="#34486F"/>
-    <text x="237" y="142" text-anchor="middle" fill="#AFC0E0" font-size="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">fan-out × 8</text>
-    <rect x="340" y="46" width="104" height="104" rx="23" fill="#EEF3FF"/>
-    <image href="{deepseek}" x="350" y="56" width="84" height="84"/>
-    <text x="392" y="183" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">DeepSeek</text>
-    <path d="M38 221H450" stroke="#26395D"/>
-    <circle cx="58" cy="243" r="6" fill="#42D392"/>
-    <text x="76" y="249" fill="#C7D1E8" font-size="17" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">deepseek-v4-pro · highest verified effort</text>
-  </g>
-</svg>
-'''
 
 workflow = '''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
   <title id="title">DeepSeek fan-out 配置和验证流程</title>
@@ -83,5 +46,11 @@ workflow = '''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" 
 </svg>
 '''
 
-(ASSETS / "hero.svg").write_text(hero, encoding="utf-8")
-(ASSETS / "workflow.svg").write_text(workflow, encoding="utf-8")
+
+def main() -> None:
+    validate_generated_hero(ASSETS / "hero.png")
+    (ASSETS / "workflow.svg").write_text(workflow, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

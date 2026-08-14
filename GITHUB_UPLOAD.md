@@ -1,6 +1,6 @@
 # GitHub 上传说明
 
-本目录已经整理为单一 Git 仓库根目录，仓库名建议使用 `codex-deepseek-subagent`。
+本目录已经整理为单一 Git 仓库根目录，公开仓库名使用 `codex-deepseek-relay`；内部 Skill 目录继续使用 `codex-deepseek-subagent`，以保持安装兼容。
 
 ## 已完成的准备
 
@@ -8,15 +8,15 @@
 - 已排除 Python 缓存、旧源码备份、压缩备份、日志、本地环境和凭据文件；
 - Windows 启动脚本只使用 `CODEX_HOME` 或 `%USERPROFILE%\.codex`，不包含作者机器的绝对路径；
 - 默认分支为 `main`，本地首个提交已准备完成；
-- README 中的安装地址按本机 Git 身份设置为 `Roblis0n/codex-deepseek-subagent`；
+- README 中的安装地址按本机 Git 身份设置为 `Roblis0n/codex-deepseek-relay`；
 - API Key 不会进入 Git，运行时只写入 Windows Credential Manager 或 macOS Keychain。
 
 ## 上传步骤
 
-先在 GitHub 创建一个名为 `codex-deepseek-subagent` 的空仓库，不要勾选自动创建 README、LICENSE 或 `.gitignore`。然后在本目录执行：
+先在 GitHub 创建一个名为 `codex-deepseek-relay` 的空仓库，不要勾选自动创建 README、LICENSE 或 `.gitignore`。然后在本目录执行：
 
 ```powershell
-git remote add origin https://github.com/Roblis0n/codex-deepseek-subagent.git
+git remote add origin https://github.com/Roblis0n/codex-deepseek-relay.git
 git push -u origin main
 ```
 

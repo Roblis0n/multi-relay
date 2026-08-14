@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 import subprocess
 import sys
 import unittest
@@ -130,19 +131,43 @@ class SkillContractTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
-    def test_readme_visuals_describe_the_three_role_fanout(self) -> None:
-        visual_text = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (
-                ROOT / "scripts" / "build_readme_assets.py",
-                ROOT / "assets" / "readme" / "hero.svg",
-                ROOT / "assets" / "readme" / "workflow.svg",
-            )
-        )
+    def test_public_repository_uses_relay_identity(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        upload_guide = (ROOT / "GITHUB_UPLOAD.md").read_text(encoding="utf-8")
 
+        self.assertIn("Codex DeepSeek Relay", readme)
+        legacy_public_repo = "Roblis0n/" + "codex-deepseek-" + "subagent"
+        for text in (readme, upload_guide):
+            self.assertIn("Roblis0n/codex-deepseek-relay", text)
+            self.assertNotIn(legacy_public_repo, text)
+        self.assertIn("`codex-deepseek-relay`", upload_guide)
+
+    def test_readme_visuals_use_generated_hero_and_describe_fanout(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_readme_assets.py").read_text(
+            encoding="utf-8"
+        )
+        workflow = (ROOT / "assets" / "readme" / "workflow.svg").read_text(
+            encoding="utf-8"
+        )
+        hero = ROOT / "assets" / "readme" / "hero.png"
+
+        self.assertIn('./assets/readme/hero.png', readme)
+        self.assertNotIn('./assets/readme/hero.svg', readme)
+        self.assertTrue(hero.is_file())
+        header = hero.read_bytes()[:24]
+        self.assertEqual(header[:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", header[16:24])
+        self.assertGreaterEqual(width, 1200)
+        self.assertGreaterEqual(width / height, 2.5)
+
+        self.assertIn('hero.png', builder)
+        self.assertNotIn('hero.svg', builder)
+        visual_text = "\n".join((readme, workflow, builder))
         self.assertIn("deepseek-v4-pro", visual_text)
-        self.assertIn("default · worker · explorer", visual_text)
-        self.assertIn("8-way fan-out", visual_text)
+        for role in ("default", "worker", "explorer"):
+            self.assertIn(role, visual_text)
+        self.assertIn("8-way fan-out", visual_text.lower())
         self.assertNotIn("v4-flash", visual_text)
         self.assertNotRegex(visual_text, r"[閰鍑瀛绱楠锛銆]{3,}")
 

@@ -1,6 +1,10 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="Codex DeepSeek 原生多子代理 fan-out">
+  <img src="./assets/readme/hero.png" width="100%" alt="ChatGPT 与 DeepSeek 通过 Codex DeepSeek Relay 协作">
 </p>
+
+<h1 align="center">Codex DeepSeek Relay</h1>
+
+<p align="center">把 Codex 的原生子代理路由到 DeepSeek，并保留可审计的任务交接与执行轨迹。</p>
 
 把 Codex 内置的 `default`、`worker`、`explorer` 子代理路由到经在线验证的 `deepseek-v4-pro`，默认允许 8 路并发。主任务继续使用你原来的 OpenAI 模型与最高思考强度。
 
@@ -29,7 +33,7 @@
 如果作为 Skill 安装：
 
 ```bash
-npx skills add Roblis0n/codex-deepseek-subagent -g -y
+npx skills add Roblis0n/codex-deepseek-relay -g -y
 ```
 
 也可以直接在项目目录双击 `configure-deepseek-subagents.cmd`。它会自动寻找真正可运行的 Python，并明确显示 Key 的填写提示。
@@ -124,6 +128,10 @@ python -m compileall -q codex-deepseek-subagent/scripts scripts
 python scripts/check_runtime_contract.py
 python scripts/check_codex_bridge_runtime.py --codex-bin <path-to-codex>
 ```
+
+## 品牌说明
+
+本项目是独立社区工具，与 OpenAI 或 DeepSeek 不存在隶属、合作或官方背书关系。ChatGPT、OpenAI、DeepSeek 及其标志归各自权利人所有。
 
 ## License
 
