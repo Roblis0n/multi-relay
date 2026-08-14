@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest import mock
+
+
+PACKAGE_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "codex-deepseek-subagent"
+    / "scripts"
+)
+sys.path.insert(0, str(PACKAGE_ROOT))
+
+from deepseek_fanout.cli import build_parser, find_codex, main  # noqa: E402
+
+
+class FakeStore:
+    def __init__(self, secret: str | None = None) -> None:
+        self.secret = secret
+
+    def exists(self) -> bool:
+        return self.secret is not None
+
+    def read(self) -> str | None:
+        return self.secret
+
+    def store(self, secret: str) -> None:
+        self.secret = secret
+
+    def remove(self) -> bool:
+        self.secret = None
+        return True
+
+
+class FakeManager:
+    def __init__(self, store: FakeStore) -> None:
+        self.credentials = store
+        self.calls: list[tuple[str, object]] = []
+
+    def status(self) -> dict[str, object]:
+        self.calls.append(("status", None))
+        return {"status": "not_configured"}
+
+    def setup(self) -> dict[str, object]:
+        self.calls.append(("setup", None))
+        return {"status": "ready", "model": "deepseek-v4-pro"}
+
+    def test(self) -> dict[str, object]:
+        self.calls.append(("test", None))
+        return {"status": "ready"}
+
+    def disable(self) -> dict[str, object]:
+        self.calls.append(("disable", None))
+        return {"status": "disabled"}
+
+    def enable(self) -> dict[str, object]:
+        self.calls.append(("enable", None))
+        return {"status": "ready"}
+
+    def uninstall(self, remove_credential: bool = False) -> dict[str, object]:
+        self.calls.append(("uninstall", remove_credential))
+        return {"status": "uninstalled"}
+
+
+class CliTests(unittest.TestCase):
+    def test_find_codex_prefers_desktop_sandbox_runtime_in_codex_home(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            runtime = home / ".sandbox-bin" / "codex.exe"
+            runtime.parent.mkdir()
+            runtime.write_bytes(b"codex")
+            with (
+                mock.patch.dict(os.environ, {"CODEX_HOME": str(home)}, clear=False),
+                mock.patch(
+                    "deepseek_fanout.cli.shutil.which",
+                    return_value=r"C:\Program Files\WindowsApps\Codex\codex.exe",
+                ),
+            ):
+                discovered = find_codex(None, required=True)
+
+        self.assertEqual(discovered, str(runtime.resolve()))
+
+    def test_parser_has_no_plaintext_api_key_option(self) -> None:
+        parser = build_parser()
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["setup", "--api-key", "sk-test"])
+
+    def test_setup_prompts_locally_and_never_prints_the_key(self) -> None:
+        store = FakeStore()
+        manager = FakeManager(store)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = main(
+                ["setup", "--json"],
+                manager_factory=lambda args: manager,
+                prompt_fn=lambda _: "sk-test",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(store.secret, "sk-test")
+        self.assertEqual(manager.calls, [("setup", None)])
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "ready")
+        self.assertNotIn("sk-test", stdout.getvalue())
+        self.assertNotIn("sk-test", stderr.getvalue())
+
+    def test_status_is_read_only_and_does_not_prompt(self) -> None:
+        store = FakeStore()
+        manager = FakeManager(store)
+        prompts = 0
+
+        def prompt(_: str) -> str:
+            nonlocal prompts
+            prompts += 1
+            return "sk-test"
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main(
+                ["status", "--json"],
+                manager_factory=lambda args: manager,
+                prompt_fn=prompt,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(prompts, 0)
+        self.assertIsNone(store.secret)
+        self.assertEqual(manager.calls, [("status", None)])
+
+    def test_uninstall_remove_credential_flag_is_forwarded_explicitly(self) -> None:
+        manager = FakeManager(FakeStore("sk-test"))
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main(
+                ["uninstall", "--remove-credential", "--json"],
+                manager_factory=lambda args: manager,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manager.calls, [("uninstall", True)])
+
+
+if __name__ == "__main__":
+    unittest.main()

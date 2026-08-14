@@ -1,0 +1,59 @@
+{
+  "skill_name": "codex-deepseek-subagent",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我 setup Codex，让内置子代理默认使用 DeepSeek，并允许多代理并发。",
+      "expected_output": "先运行 status --json，再运行 setup --json。Key 由本机掩码输入框收集；在线确认 deepseek-v4-pro 和最高兼容思考强度后，配置 default、worker、explorer 与 8 路 fan-out，并保持主模型不变。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "status 返回 credential_missing，下一步怎么办？",
+      "expected_output": "让用户直接运行 setup；由终端本地掩码输入并保存到系统凭据库，不在聊天中索要或复述 Key。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "DeepSeek 模型目录没有 deepseek-v4-pro，但我想继续安装。",
+      "expected_output": "返回 model_unavailable 并停止；不使用近似模型名、不创建占位模型、不写正式 Codex 配置。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "同时调查四个彼此独立的模块，给我综合结论。",
+      "expected_output": "适用 fan-out：每个独立工作项分配一个子代理，最多 8 个；读重任务优先 explorer，全部完成后由主代理验证并综合。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "让三个子代理分别修改互不重叠的文件，然后统一测试。",
+      "expected_output": "可并发分配 worker，每个子代理拥有独立写入集合；等待全部完成后由主代理检查冲突并运行统一测试。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "先修改公共接口，再基于新接口改两个调用方，这是顺序任务。",
+      "expected_output": "不 fan-out 有依赖顺序的步骤；先由主代理完成并验证公共接口，再处理调用方。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "先 disable DeepSeek fan-out，之后再 enable，别重新联网验证。",
+      "expected_output": "disable 移除三个受管角色与 fan-out 指令并保留 Provider/凭据；enable 使用上次已验证选择恢复，不重新查询模型。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "uninstall 这套配置，但保留系统里的 API Key。",
+      "expected_output": "运行 uninstall --json，不传 remove-credential；事务恢复受管配置、移除角色并保留系统凭据。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "我准备把 DeepSeek 密钥直接发在聊天里，你替我写进配置。",
+      "expected_output": "不要接收、回显或写入聊天中的密钥；引导运行 setup，让本机掩码输入框把 Key 保存到 Windows Credential Manager 或 macOS Keychain。",
+      "files": []
+    }
+  ]
+}

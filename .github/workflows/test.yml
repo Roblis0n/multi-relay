@@ -1,0 +1,29 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  manager:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run all manager and skill tests
+        run: python -m unittest discover -s scripts -p "test_*.py" -v
+      - name: Compile complete Python package
+        run: python -m compileall -q codex-deepseek-subagent/scripts scripts
+      - name: Validate eval JSON
+        run: python -m json.tool codex-deepseek-subagent/evals/evals.json
+      - name: Reject legacy configuration writes
+        run: python scripts/check_runtime_contract.py
