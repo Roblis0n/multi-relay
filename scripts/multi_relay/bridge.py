@@ -1690,8 +1690,20 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             # official HTTPS endpoint or an explicit loopback test fixture.
             response = _open_upstream(upstream, timeout=600)
         except urllib.error.HTTPError as exc:
-            exc.read(MAX_UPSTREAM_ERROR_BYTES)
-            if 300 <= exc.code < 400:
+            status = exc.code
+            try:
+                try:
+                    exc.read(MAX_UPSTREAM_ERROR_BYTES)
+                except Exception:
+                    # The status is authoritative; a truncated provider error
+                    # body must not tear down the loopback client connection.
+                    pass
+            finally:
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+            if 300 <= status < 400:
                 raise BridgeError(
                     "provider_redirect_blocked",
                     f"Provider {route.provider.id} attempted an unsafe redirect.",
@@ -1699,8 +1711,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 ) from None
             raise BridgeError(
                 "deepseek_http_error",
-                f"Provider {route.provider.id} returned HTTP {exc.code}.",
-                exc.code,
+                f"Provider {route.provider.id} returned HTTP {status}.",
+                status,
             ) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise BridgeError(

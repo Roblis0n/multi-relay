@@ -441,7 +441,9 @@ class ManagerTests(unittest.TestCase):
 
     def test_owned_legacy_install_is_migrated_without_v1_or_catalog_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            alias_component = Path(directory) / "alias"
+            alias_component.mkdir()
+            home = alias_component / ".."
             catalog = home / "models-with-deepseek.json"
             legacy_agent = home / "agents" / "DeepSeek.toml"
             legacy_agent.parent.mkdir(parents=True)

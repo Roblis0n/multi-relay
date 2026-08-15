@@ -183,13 +183,14 @@ class CredentialTests(unittest.TestCase):
         self.assertFalse(any("provider-token" in part for part in command))
 
     def test_provider_auth_command_carries_an_explicit_codex_home_without_secret(self) -> None:
+        codex_home = Path("C:/Users/test/.codex")
         command = provider_auth_command(
             "vendor",
-            codex_home=Path("C:/Users/test/.codex"),
+            codex_home=codex_home,
             protocol="responses-compatible",
         )
 
-        self.assertEqual(command[-2:], ["--codex-home", "C:\\Users\\test\\.codex"])
+        self.assertEqual(command[-2:], ["--codex-home", str(codex_home)])
 
     def test_custom_provider_requires_an_explicit_protocol(self) -> None:
         for operation in (

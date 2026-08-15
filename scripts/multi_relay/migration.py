@@ -116,6 +116,20 @@ def _matches_checksum(path: Path, expected: object) -> bool:
     return expected in {raw, normalized}
 
 
+def _identifies_same_file(value: object, expected: Path) -> bool:
+    """Compare a configured path with its managed file across aliases."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        candidate = Path(value).expanduser()
+        if candidate.exists() and expected.exists():
+            return candidate.samefile(expected)
+        return candidate.resolve(strict=False) == expected.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def plan_legacy_migration(
     paths: Paths,
     config_text: str,
@@ -146,7 +160,10 @@ def plan_legacy_migration(
         raise ManagerError("invalid_config", "Legacy config.toml is not valid TOML.") from None
 
     catalog = paths.home / "models-with-deepseek.json"
-    if manifest.get("managed_catalog_selection") and parsed.get("model_catalog_json") == str(catalog):
+    if manifest.get("managed_catalog_selection") and _identifies_same_file(
+        parsed.get("model_catalog_json"),
+        catalog,
+    ):
         previous_catalog = manifest.get("previous_model_catalog_json")
         if previous_catalog is None:
             candidate = _remove_top_level_key(candidate, "model_catalog_json")

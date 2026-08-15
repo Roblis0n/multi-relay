@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -28,7 +29,7 @@ from multi_relay.bridge import (  # noqa: E402
     build_chat_request,
     main as bridge_main,
 )
-from multi_relay.catalog import Catalog, ProviderSpec  # noqa: E402
+from multi_relay.catalog import Catalog, ProviderSpec, default_catalog  # noqa: E402
 
 
 def provider(
@@ -281,6 +282,9 @@ class ProviderAddressedHttpTests(unittest.TestCase):
                     "Location",
                     f"http://127.0.0.1:{sink.server_address[1]}/stolen",
                 )
+                # A malformed/truncated redirect body must not prevent the
+                # bridge from returning its managed 502 response.
+                self.send_header("Content-Length", "1")
                 self.end_headers()
 
         redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
@@ -349,6 +353,52 @@ class ProviderAddressedHttpTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 502)
         self.assertEqual(sink_headers, [])
+
+    def test_unreadable_redirect_body_still_returns_a_managed_502(self) -> None:
+        class UnreadableBody:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def read(self, amount: int = -1) -> bytes:
+                raise OSError("truncated redirect body")
+
+            def close(self) -> None:
+                self.closed = True
+
+        error_body = UnreadableBody()
+        redirect_error = urllib.error.HTTPError(
+            "https://api.deepseek.com/chat/completions",
+            302,
+            "redirect",
+            {},
+            error_body,
+        )
+        bridge = _BridgeServer(("127.0.0.1", 0), catalog=default_catalog("hybrid"))
+        bridge_thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        bridge_thread.start()
+        try:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{bridge.server_address[1]}/v1/providers/deepseek/responses",
+                data=json.dumps(body("deepseek-v4-pro")).encode("utf-8"),
+                headers={
+                    "Authorization": "Bearer sk-test",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with mock.patch(
+                "multi_relay.bridge._open_upstream",
+                side_effect=redirect_error,
+            ):
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    urllib.request.urlopen(request, timeout=5)
+        finally:
+            bridge.shutdown()
+            bridge.server_close()
+            bridge_thread.join(timeout=2)
+
+        self.assertEqual(raised.exception.code, 502)
+        self.assertTrue(error_body.closed)
 
     def test_provider_addressed_route_uses_its_upstream_and_generic_payload(self) -> None:
         received: dict[str, object] = {}
