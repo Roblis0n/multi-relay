@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "codex-deepseek-subagent" / "scripts" / "deepseek_fanout"
+PACKAGE = ROOT / "scripts" / "deepseek_fanout"
 FORBIDDEN = (
     "multi_agent_version",
     "multi_agent_v2 = false",

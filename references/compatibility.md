@@ -29,7 +29,7 @@
 - 主配置：`$CODEX_HOME/config.toml`
 - 子角色：`$CODEX_HOME/agents/default.toml`、`worker.toml`、`explorer.toml`
 - 自动 fan-out 指令：`$CODEX_HOME/AGENTS.md` 中的受管块
-- 状态、锁和备份：`$CODEX_HOME/codex-deepseek-subagent/`
+- 状态、锁和备份：`$CODEX_HOME/codex-deepseek-relay/`
 
 管理器只增加用户级 DeepSeek Provider、启用原生多代理、启用 agents，并把并发下限设为 8。用户已经设置高于 8 的值时保留更高值。新版多代理保持 `multi_agent_v2.enabled = true`，工具命名空间保持 `agents`。
 
@@ -94,7 +94,7 @@ Codex UI 中可见的 reasoning summary 由适配层根据已经实际生成的�
 任意目标写入或正式验收失败时恢复事务前的精确文件状态。备份位于：
 
 ```text
-$CODEX_HOME/codex-deepseek-subagent/backups/<timestamp>-<operation>/
+$CODEX_HOME/codex-deepseek-relay/backups/<timestamp>-<operation>/
 ```
 
 重复 setup 保留第一次安装前的受管字段值。disable、enable 和 uninstall 都使用同一事务机制。

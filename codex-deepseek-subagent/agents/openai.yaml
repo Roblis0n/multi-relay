@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex DeepSeek Fan-out"
-  short_description: "安全配置并验证 Codex 的 DeepSeek 多子代理"
-  default_prompt: "Use $codex-deepseek-subagent to securely configure and verify DeepSeek fan-out for Codex."

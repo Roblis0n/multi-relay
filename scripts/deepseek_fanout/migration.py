@@ -93,6 +93,8 @@ def plan_legacy_migration(
     paths: Paths,
     config_text: str,
     manifest: dict[str, Any],
+    *,
+    state_root: Path | None = None,
 ) -> LegacyMigration:
     """Return candidate restoration/removal actions without changing live files."""
 
@@ -163,8 +165,9 @@ def plan_legacy_migration(
             if not isinstance(backup_value, str):
                 raise ManagerError("invalid_manifest", "The original catalog backup is missing.")
             backup = Path(backup_value).expanduser().resolve()
+            trusted_state_root = (state_root or paths.state_dir).resolve()
             try:
-                backup.relative_to(paths.state_dir.resolve())
+                backup.relative_to(trusted_state_root)
             except ValueError:
                 raise ManagerError("unsafe_backup", "The legacy catalog backup is outside managed state.") from None
             if not backup.is_file():

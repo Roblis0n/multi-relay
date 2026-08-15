@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_ROOT = ROOT / "codex-deepseek-subagent" / "scripts"
+PACKAGE_ROOT = ROOT / "scripts"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout import bridge as bridge_module  # noqa: E402

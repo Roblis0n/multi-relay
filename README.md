@@ -42,21 +42,21 @@
 npx skills add Roblis0n/codex-deepseek-relay -g -y
 ```
 
-也可以直接在项目目录双击 `configure-deepseek-subagents.cmd`。它会自动寻找真正可运行的 Python，并明确显示 Key 的填写提示。
+也可以直接在项目目录双击 `configure-relay.cmd`。它会自动寻找真正可运行的 Python，并明确显示 Key 的填写提示。
 
 Windows 终端方式：
 
 ```powershell
-python codex-deepseek-subagent\scripts\codex_deepseek.py setup
+python scripts\relay.py setup
 ```
 
 macOS：
 
 ```bash
-python3 codex-deepseek-subagent/scripts/codex_deepseek.py setup
+python3 scripts/relay.py setup
 ```
 
-命令会在当前终端显示本地掩码输入框。Key 不要发到 ChatGPT；输入后保存到系统凭据目标 `codex-deepseek-api-key`。
+命令会在当前终端显示本地掩码输入框。Key 不要发到任何聊天窗口；输入后保存到系统凭据目标 `codex-deepseek-api-key`。
 
 只有模型实存、最高兼容思考强度、隔离 Provider 探测、正式单代理、三路并发、工具调用、续接和线程元数据全部通过，才返回 `ready`。完整子代理验收只运行一次，并使用实际 Codex 父模型；若失败，事务会恢复原配置。如果服务端暂时没有 `deepseek-v4-pro`，程序返回 `model_unavailable`，正式 Codex 配置不会改变。
 
@@ -99,14 +99,14 @@ DeepSeek 的原始推理内容只用于同一子线程的工具续接，并以�
 以下以 Windows 为例；macOS 把 `python` 换成 `python3`，路径分隔符换成 `/`：
 
 ```powershell
-python codex-deepseek-subagent\scripts\codex_deepseek.py status --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py setup --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py test --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py repair --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py disable --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py enable --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --remove-credential --json
+python scripts\relay.py status --json
+python scripts\relay.py setup --json
+python scripts\relay.py test --json
+python scripts\relay.py repair --json
+python scripts\relay.py disable --json
+python scripts\relay.py enable --json
+python scripts\relay.py uninstall --json
+python scripts\relay.py uninstall --remove-credential --json
 ```
 
 - 普通 uninstall 保留 Key。
@@ -119,18 +119,18 @@ python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --remove-cred
 管理器使用进程锁、解析后写入、同目录原子替换和逐文件校验和。备份位于：
 
 ```text
-$CODEX_HOME/codex-deepseek-subagent/backups/
+$CODEX_HOME/codex-deepseek-relay/backups/
 ```
 
-Key 不进入配置、命令参数、临时文件、备份、日志、异常或 Git。旧单角色安装只在 manifest、受管标记和校验和共同证明所有权时自动迁移。
+Key 不进入配置、命令参数、临时文件、备份、日志、异常或 Git。旧版本状态会在首次改动配置的管理操作中安全接管；旧单角色安装只在 manifest、受管标记和校验和共同证明所有权时自动迁移。
 
-更多细节见 [兼容性与安全边界](codex-deepseek-subagent/references/compatibility.md) 和 [Skill 执行规则](codex-deepseek-subagent/SKILL.md)。
+更多细节见 [兼容性与安全边界](references/compatibility.md) 和 [Skill 执行规则](SKILL.md)。
 
 ## 开发验证
 
 ```bash
 python -m unittest discover -s scripts -p "test_*.py" -v
-python -m compileall -q codex-deepseek-subagent/scripts scripts
+python -m compileall -q scripts
 python scripts/check_runtime_contract.py
 python scripts/check_codex_bridge_runtime.py --codex-bin <path-to-codex>
 ```

@@ -42,21 +42,21 @@ To install as a Skill:
 npx skills add Roblis0n/codex-deepseek-relay -g -y
 ```
 
-You can also double-click `configure-deepseek-subagents.cmd` directly in the project directory. It locates a working Python on its own and shows clear prompts for entering the Key.
+You can also double-click `configure-relay.cmd` directly in the project directory. It locates a working Python on its own and shows clear prompts for entering the Key.
 
 Windows terminal:
 
 ```powershell
-python codex-deepseek-subagent\scripts\codex_deepseek.py setup
+python scripts\relay.py setup
 ```
 
 macOS:
 
 ```bash
-python3 codex-deepseek-subagent/scripts/codex_deepseek.py setup
+python3 scripts/relay.py setup
 ```
 
-The command shows a locally masked input field in the current terminal. Do not send the Key to ChatGPT; once entered, it is saved to the system credential target `codex-deepseek-api-key`.
+The command shows a locally masked input field in the current terminal. Do not paste the Key into any chat UI; once entered, it is saved to the system credential target `codex-deepseek-api-key`.
 
 `ready` is returned only after all of these pass: the model actually exists, the highest compatible reasoning tier, isolated provider probing, a formal single-agent run, three-way concurrency, tool calls, continuation, and thread metadata. Full subagent acceptance runs exactly once and uses the real Codex parent model; on failure, the transaction restores the previous configuration. If the server does not currently offer `deepseek-v4-pro`, the program returns `model_unavailable` and the official Codex configuration stays unchanged.
 
@@ -99,14 +99,14 @@ DeepSeek's raw reasoning content is used only for tool continuation inside the s
 The examples below use Windows; on macOS replace `python` with `python3` and use `/` path separators:
 
 ```powershell
-python codex-deepseek-subagent\scripts\codex_deepseek.py status --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py setup --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py test --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py repair --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py disable --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py enable --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --json
-python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --remove-credential --json
+python scripts\relay.py status --json
+python scripts\relay.py setup --json
+python scripts\relay.py test --json
+python scripts\relay.py repair --json
+python scripts\relay.py disable --json
+python scripts\relay.py enable --json
+python scripts\relay.py uninstall --json
+python scripts\relay.py uninstall --remove-credential --json
 ```
 
 - A plain uninstall keeps the Key.
@@ -119,18 +119,18 @@ python codex-deepseek-subagent\scripts\codex_deepseek.py uninstall --remove-cred
 The manager uses process locks, parse-before-write, atomic replacement within the same directory, and per-file checksums. Backups live at:
 
 ```text
-$CODEX_HOME/codex-deepseek-subagent/backups/
+$CODEX_HOME/codex-deepseek-relay/backups/
 ```
 
-The Key never enters configuration, command arguments, temporary files, backups, logs, exceptions, or Git. Legacy single-role installations are migrated automatically only when the manifest, managed markers, and checksums jointly prove ownership.
+The Key never enters configuration, command arguments, temporary files, backups, logs, exceptions, or Git. State from earlier releases is safely adopted by the first configuration-changing management operation; legacy single-role installations are migrated automatically only when the manifest, managed markers, and checksums jointly prove ownership.
 
-See [Compatibility and safety boundaries](codex-deepseek-subagent/references/compatibility.md) and [Skill execution rules](codex-deepseek-subagent/SKILL.md) for more details.
+See [Compatibility and safety boundaries](references/compatibility.md) and [Skill execution rules](SKILL.md) for more details.
 
 ## Development validation
 
 ```bash
 python -m unittest discover -s scripts -p "test_*.py" -v
-python -m compileall -q codex-deepseek-subagent/scripts scripts
+python -m compileall -q scripts
 python scripts/check_runtime_contract.py
 python scripts/check_codex_bridge_runtime.py --codex-bin <path-to-codex>
 ```

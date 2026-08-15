@@ -27,8 +27,8 @@ def _common_parser() -> argparse.ArgumentParser:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="codex-deepseek",
-        description="Secure native DeepSeek fan-out for Codex built-in child roles.",
+        prog="codex-deepseek-relay",
+        description="Local Relay for secure native Codex-to-DeepSeek child fan-out.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     common = _common_parser()

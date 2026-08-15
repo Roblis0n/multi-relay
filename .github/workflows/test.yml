@@ -22,8 +22,8 @@ jobs:
       - name: Run all manager and skill tests
         run: python -m unittest discover -s scripts -p "test_*.py" -v
       - name: Compile complete Python package
-        run: python -m compileall -q codex-deepseek-subagent/scripts scripts
+        run: python -m compileall -q scripts
       - name: Validate eval JSON
-        run: python -m json.tool codex-deepseek-subagent/evals/evals.json
+        run: python -m json.tool evals/evals.json
       - name: Reject legacy configuration writes
         run: python scripts/check_runtime_contract.py

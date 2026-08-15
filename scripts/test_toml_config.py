@@ -8,11 +8,7 @@ import unittest
 from pathlib import Path
 
 
-PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "codex-deepseek-subagent"
-    / "scripts"
-)
+PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout.toml_config import (  # noqa: E402

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_DIR = ROOT / "codex-deepseek-subagent"
+SKILL_DIR = ROOT
 
 
 class SkillContractTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class SkillContractTests(unittest.TestCase):
 
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group(1), "codex-deepseek-subagent")
+        self.assertEqual(match.group(1), "codex-deepseek-relay")
         self.assertTrue(match.group(2).startswith("Use when "))
         self.assertIn("Codex", match.group(2))
         self.assertIn("DeepSeek", match.group(2))
@@ -132,20 +132,17 @@ class SkillContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_public_repository_uses_relay_identity(self) -> None:
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        upload_guide = (ROOT / "GITHUB_UPLOAD.md").read_text(encoding="utf-8")
+        readmes = tuple(
+            (ROOT / name).read_text(encoding="utf-8")
+            for name in ("README.md", "README_EN.md")
+        )
 
-        self.assertIn("Codex DeepSeek Relay", readme)
+        self.assertIn("Codex DeepSeek Relay", readmes[0])
         legacy_public_repo = "Roblis0n/" + "codex-deepseek-" + "subagent"
-        for text in (readme, upload_guide):
+        for text in readmes:
             self.assertIn("Roblis0n/codex-deepseek-relay", text)
             self.assertNotIn(legacy_public_repo, text)
-        self.assertIn("`codex-deepseek-relay`", upload_guide)
-        self.assertIn(
-            "A local relay routing Codex's native subagent fan-out to DeepSeek, "
-            "with verified setup and transactional rollback.",
-            upload_guide,
-        )
+        self.assertFalse((ROOT / "GITHUB_UPLOAD.md").exists())
 
     def test_bilingual_readmes_are_complete_and_cross_linked(self) -> None:
         chinese = (ROOT / "README.md").read_text(encoding="utf-8")

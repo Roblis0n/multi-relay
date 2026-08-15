@@ -17,6 +17,8 @@ class Paths:
     instruction_file: Path
     state_dir: Path
     manifest: Path
+    legacy_state_dir: Path
+    legacy_manifest: Path
 
 
 def resolve_paths(codex_home: str | None = None) -> Paths:
@@ -24,7 +26,8 @@ def resolve_paths(codex_home: str | None = None) -> Paths:
 
     raw_home = codex_home or os.environ.get("CODEX_HOME") or Path.home() / ".codex"
     home = Path(raw_home).expanduser().resolve()
-    state_dir = home / "codex-deepseek-subagent"
+    state_dir = home / "codex-deepseek-relay"
+    legacy_state_dir = home / "codex-deepseek-subagent"
     return Paths(
         home=home,
         config=home / "config.toml",
@@ -32,4 +35,6 @@ def resolve_paths(codex_home: str | None = None) -> Paths:
         instruction_file=home / "AGENTS.md",
         state_dir=state_dir,
         manifest=state_dir / "manifest.json",
+        legacy_state_dir=legacy_state_dir,
+        legacy_manifest=legacy_state_dir / "manifest.json",
     )

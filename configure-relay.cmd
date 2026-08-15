@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-title Configure Codex DeepSeek subagents
+title Configure Codex DeepSeek Relay
 
 if defined DEEPSEEK_MANAGER (
   set "MANAGER=%DEEPSEEK_MANAGER%"
 ) else (
-  set "MANAGER=%~dp0codex-deepseek-subagent\scripts\codex_deepseek.py"
+  set "MANAGER=%~dp0scripts\relay.py"
 )
 
 if not exist "%MANAGER%" (

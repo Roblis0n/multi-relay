@@ -13,11 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 
-PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "codex-deepseek-subagent"
-    / "scripts"
-)
+PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout.cli import build_parser, find_codex, main  # noqa: E402

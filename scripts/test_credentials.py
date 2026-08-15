@@ -10,11 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 
-PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "codex-deepseek-subagent"
-    / "scripts"
-)
+PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout import ManagerError  # noqa: E402

@@ -123,6 +123,28 @@ class FanoutManager:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-%fZ")
         return self.paths.state_dir / "backups" / f"{stamp}-{operation}"
 
+    def _read_manifest(self) -> tuple[dict[str, Any], Path]:
+        """Read the Relay manifest, falling back to the last public legacy location."""
+
+        if self.paths.manifest.exists():
+            return _read_json(self.paths.manifest), self.paths.manifest
+        if self.paths.legacy_manifest.exists():
+            return _read_json(self.paths.legacy_manifest), self.paths.legacy_manifest
+        return {}, self.paths.manifest
+
+    def _adoption_removals(self, source: Path) -> tuple[Path, ...]:
+        if source == self.paths.legacy_manifest:
+            return (source,)
+        return ()
+
+    @staticmethod
+    def _require_current_schema(manifest: dict[str, Any]) -> None:
+        if manifest.get("schema_version") != SCHEMA_VERSION:
+            raise ManagerError(
+                "legacy_requires_setup",
+                "Run setup or repair to migrate this legacy DeepSeek installation first.",
+            )
+
     def _relative(self, path: Path) -> str:
         try:
             return path.relative_to(self.paths.home).as_posix()
@@ -270,13 +292,14 @@ class FanoutManager:
             if not self.paths.config.is_file():
                 raise ManagerError("config_missing", "Codex config.toml was not found.")
             original_config = self.paths.config.read_text(encoding="utf-8")
-            previous_manifest = _read_json(self.paths.manifest)
+            previous_manifest, manifest_source = self._read_manifest()
             migration: LegacyMigration | None = None
             if previous_manifest and previous_manifest.get("schema_version") != SCHEMA_VERSION:
                 migration = plan_legacy_migration(
                     self.paths,
                     original_config,
                     previous_manifest,
+                    state_root=manifest_source.parent,
                 )
             working_config = migration.config_text if migration else original_config
 
@@ -343,10 +366,12 @@ class FanoutManager:
                 **(migration.files if migration else {}),
                 **desired_roles,
             }
+            removals = list(migration.removals if migration else ())
+            removals.extend(self._adoption_removals(manifest_source))
             transaction = execute_install_plan(
                 InstallPlan(
                     files=files,
-                    removals=migration.removals if migration else (),
+                    removals=tuple(removals),
                     manifest=manifest,
                     backup_dir=self._backup_dir("setup"),
                 ),
@@ -379,7 +404,7 @@ class FanoutManager:
             }
 
     def status(self) -> dict[str, Any]:
-        manifest = _read_json(self.paths.manifest)
+        manifest, _ = self._read_manifest()
         credential_present = False
         try:
             credential_present = self.credentials.exists()
@@ -449,8 +474,11 @@ class FanoutManager:
         }
 
     def test(self) -> dict[str, Any]:
-        manifest = _read_json(self.paths.manifest)
-        if not manifest or manifest.get("status") != "enabled":
+        manifest, _ = self._read_manifest()
+        if not manifest:
+            raise ManagerError("not_configured", "DeepSeek fan-out is not enabled.")
+        self._require_current_schema(manifest)
+        if manifest.get("status") != "enabled":
             raise ManagerError("not_configured", "DeepSeek fan-out is not enabled.")
         selection = _selection_from_manifest(manifest)
         report = self._live_acceptance(self.codex_bin, self.paths.home, selection)
@@ -459,12 +487,14 @@ class FanoutManager:
 
     def disable(self) -> dict[str, Any]:
         with operation_lock(self._lock_path):
-            manifest = _read_json(self.paths.manifest)
+            manifest, manifest_source = self._read_manifest()
             if not manifest:
                 raise ManagerError("not_configured", "DeepSeek fan-out is not installed.")
+            self._require_current_schema(manifest)
             if manifest.get("status") == "disabled":
                 return {"status": "disabled"}
             removals = list(self._assert_removal_ownership(manifest))
+            removals.extend(self._adoption_removals(manifest_source))
             instructions = (
                 self.paths.instruction_file.read_text(encoding="utf-8")
                 if self.paths.instruction_file.is_file()
@@ -494,9 +524,10 @@ class FanoutManager:
 
     def enable(self) -> dict[str, Any]:
         with operation_lock(self._lock_path):
-            manifest = _read_json(self.paths.manifest)
+            manifest, manifest_source = self._read_manifest()
             if not manifest:
                 raise ManagerError("not_configured", "DeepSeek fan-out is not installed.")
+            self._require_current_schema(manifest)
             if manifest.get("status") == "enabled":
                 return self.status()
             selection = _selection_from_manifest(manifest)
@@ -518,10 +549,11 @@ class FanoutManager:
             updated_manifest.pop("backup", None)
             updated_manifest.pop("transaction_targets", None)
             updated_manifest["status"] = "enabled"
+            removals = self._adoption_removals(manifest_source)
             execute_install_plan(
                 InstallPlan(
                     files=files,
-                    removals=(),
+                    removals=removals,
                     manifest=updated_manifest,
                     backup_dir=self._backup_dir("enable"),
                 ),
@@ -531,13 +563,15 @@ class FanoutManager:
 
     def uninstall(self, remove_credential: bool = False) -> dict[str, Any]:
         with operation_lock(self._lock_path):
-            manifest = _read_json(self.paths.manifest)
+            manifest, manifest_source = self._read_manifest()
             if not manifest:
                 if remove_credential:
                     self.credentials.remove()
                 self._bridge_stopper()
                 return {"status": "uninstalled"}
+            self._require_current_schema(manifest)
             removals = list(self._assert_removal_ownership(manifest))
+            removals.extend(self._adoption_removals(manifest_source))
             config = self.paths.config.read_text(encoding="utf-8")
             original_values = manifest.get("original_values")
             if not isinstance(original_values, dict):

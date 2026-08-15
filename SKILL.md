@@ -1,9 +1,9 @@
 ---
-name: codex-deepseek-subagent
+name: codex-deepseek-relay
 description: Use when a user asks to configure, validate, test, repair, disable, enable, or uninstall DeepSeek as Codex native subagents, or when DeepSeek child fan-out, custom-provider routing, model availability, reasoning effort, credential-vault storage, or legacy single-agent migration is involved.
 ---
 
-# Codex DeepSeek Fan-out
+# Codex DeepSeek Relay
 
 只维护 Codex 与 DeepSeek 的子代理配置。日常编码、探索和评审任务不重复运行本 Skill。
 
@@ -29,17 +29,17 @@ description: Use when a user asks to configure, validate, test, repair, disable,
 
 ## 管理命令
 
-入口为 `scripts/codex_deepseek.py`。Windows 使用 `py -3`，macOS 使用 `python3`：
+入口为 `scripts/relay.py`。Windows 使用 `py -3`，macOS 使用 `python3`：
 
 ```text
-python3 <skill-dir>/scripts/codex_deepseek.py status --json
-python3 <skill-dir>/scripts/codex_deepseek.py setup --json
-python3 <skill-dir>/scripts/codex_deepseek.py test --json
-python3 <skill-dir>/scripts/codex_deepseek.py repair --json
-python3 <skill-dir>/scripts/codex_deepseek.py disable --json
-python3 <skill-dir>/scripts/codex_deepseek.py enable --json
-python3 <skill-dir>/scripts/codex_deepseek.py uninstall --json
-python3 <skill-dir>/scripts/codex_deepseek.py uninstall --remove-credential --json
+python3 <skill-dir>/scripts/relay.py status --json
+python3 <skill-dir>/scripts/relay.py setup --json
+python3 <skill-dir>/scripts/relay.py test --json
+python3 <skill-dir>/scripts/relay.py repair --json
+python3 <skill-dir>/scripts/relay.py disable --json
+python3 <skill-dir>/scripts/relay.py enable --json
+python3 <skill-dir>/scripts/relay.py uninstall --json
+python3 <skill-dir>/scripts/relay.py uninstall --remove-credential --json
 ```
 
 - `status`：只读检查，不提示凭据，不写文件。
@@ -63,6 +63,7 @@ $CODEX_HOME/agents/explorer.toml
 
 - `ready`：模型、隔离 Provider 门禁、正式原生验收和静态配置均通过。
 - `not_configured`：尚未安装。
+- `legacy` / `legacy_requires_setup`：先运行 `setup` 或 `repair` 完成受校验迁移，再执行其他生命周期操作。
 - `credential_missing`：引导用户直接运行 `setup`，由本机掩码输入框收集。
 - `model_unavailable`：明确说明 `deepseek-v4-pro` 当前不可用；不安装近似名称或占位模型。
 - `compatibility_failed`：报告失败检查项；正式写入前失败则不改配置，写入后失败则回滚。

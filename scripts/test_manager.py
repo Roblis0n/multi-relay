@@ -11,11 +11,7 @@ import json
 from pathlib import Path
 
 
-PACKAGE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "codex-deepseek-subagent"
-    / "scripts"
-)
+PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout import ManagerError, Paths, resolve_paths  # noqa: E402
@@ -132,7 +128,77 @@ class ManagerTests(unittest.TestCase):
         self.assertIsInstance(paths, Paths)
         self.assertEqual(paths.agents_dir, root / "agents")
         self.assertEqual(paths.instruction_file, root / "AGENTS.md")
+        self.assertEqual(paths.state_dir, root / "codex-deepseek-relay")
+        self.assertEqual(paths.manifest, paths.state_dir / "manifest.json")
+        self.assertEqual(paths.legacy_state_dir, root / "codex-deepseek-subagent")
+        self.assertEqual(paths.legacy_manifest, paths.legacy_state_dir / "manifest.json")
         self.assertFalse(hasattr(paths, "catalog"))
+
+    def test_current_install_in_legacy_state_is_read_and_adopted_on_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\n', encoding="utf-8"
+            )
+            manager = self.make_manager(home)
+            manager.setup()
+            paths = manager.paths
+            paths.legacy_state_dir.mkdir(parents=True, exist_ok=True)
+            paths.manifest.replace(paths.legacy_manifest)
+
+            self.assertEqual(manager.status()["status"], "ready")
+            result = manager.disable()
+
+            self.assertEqual(result["status"], "disabled")
+            self.assertTrue(paths.manifest.is_file())
+            self.assertFalse(paths.legacy_manifest.exists())
+            adopted = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            self.assertEqual(adopted["status"], "disabled")
+
+    def test_failed_legacy_state_adoption_restores_the_old_manifest_location(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            config = home / "config.toml"
+            config.write_text('model = "gpt-5.6-sol"\n', encoding="utf-8")
+            manager = self.make_manager(home)
+            manager.setup()
+            manager.disable()
+            paths = manager.paths
+            paths.legacy_state_dir.mkdir(parents=True, exist_ok=True)
+            legacy_manifest = paths.manifest.read_bytes()
+            paths.manifest.replace(paths.legacy_manifest)
+            config_before = config.read_bytes()
+
+            failing_manager = self.make_manager(
+                home,
+                live_report=provider_smoke_report(self.selection),
+            )
+            with self.assertRaises(ManagerError) as raised:
+                failing_manager.setup()
+
+            self.assertEqual(raised.exception.code, "compatibility_failed")
+            self.assertFalse(paths.manifest.exists())
+            self.assertEqual(paths.legacy_manifest.read_bytes(), legacy_manifest)
+            self.assertEqual(config.read_bytes(), config_before)
+            self.assertEqual(list((home / "agents").glob("*.toml")), [])
+            self.assertFalse((home / "AGENTS.md").exists())
+
+    def test_lifecycle_changes_refuse_schema3_state_until_setup_migrates_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = resolve_paths(str(home))
+            paths.legacy_state_dir.mkdir(parents=True)
+            legacy_payload = b'{"schema_version":3,"status":"enabled","managed_files":{}}\n'
+            paths.legacy_manifest.write_bytes(legacy_payload)
+            manager = self.make_manager(home)
+
+            for action in (manager.test, manager.disable, manager.enable, manager.uninstall):
+                with self.subTest(action=action.__name__):
+                    with self.assertRaises(ManagerError) as raised:
+                        action()
+                    self.assertEqual(raised.exception.code, "legacy_requires_setup")
+                    self.assertEqual(paths.legacy_manifest.read_bytes(), legacy_payload)
+                    self.assertFalse(paths.manifest.exists())
 
     def test_setup_gates_before_writes_then_installs_all_builtin_roles(self) -> None:
         events: list[str] = []
@@ -165,7 +231,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "ready")
             self.assertEqual(manager.status()["status"], "ready")
             manifest = json.loads(
-                (home / "codex-deepseek-subagent" / "manifest.json").read_text(
+                (home / "codex-deepseek-relay" / "manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -242,7 +308,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(list((home / "agents").glob("*.toml")), [])
             self.assertFalse((home / "AGENTS.md").exists())
             self.assertFalse(
-                (home / "codex-deepseek-subagent" / "manifest.json").exists()
+                (home / "codex-deepseek-relay" / "manifest.json").exists()
             )
 
     def test_conflicting_user_owned_role_is_not_overwritten(self) -> None:
@@ -304,7 +370,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(parsed["model"], "gpt-5.6-sol")
             self.assertIs(parsed["features"]["multi_agent"], False)
             self.assertNotIn("model_providers", parsed)
-            self.assertFalse((home / "codex-deepseek-subagent" / "manifest.json").exists())
+            self.assertFalse((home / "codex-deepseek-relay" / "manifest.json").exists())
             self.assertEqual(store.remove_calls, 0)
             self.assertEqual(events[-1], "bridge_stop")
 
@@ -420,9 +486,11 @@ class ManagerTests(unittest.TestCase):
                 {path.name for path in (home / "agents").glob("*.toml")},
                 {"default.toml", "worker.toml", "explorer.toml"},
             )
-            new_manifest = json.loads((state / "manifest.json").read_text(encoding="utf-8"))
+            new_manifest_path = home / "codex-deepseek-relay" / "manifest.json"
+            new_manifest = json.loads(new_manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(new_manifest["schema_version"], 4)
             self.assertIs(new_manifest["legacy_migrated"], True)
+            self.assertFalse((state / "manifest.json").exists())
 
 
 if __name__ == "__main__":
