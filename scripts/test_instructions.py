@@ -11,6 +11,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout import ManagerError  # noqa: E402
+from deepseek_fanout.catalog import default_catalog  # noqa: E402
 from deepseek_fanout.instructions import (  # noqa: E402
     apply_fanout_instructions,
     remove_fanout_instructions,
@@ -26,8 +27,8 @@ class FanoutInstructionTests(unittest.TestCase):
 
         self.assertEqual(second, first)
         self.assertTrue(first.startswith(original.rstrip()))
-        self.assertEqual(first.count("<!-- BEGIN CODEX-DEEPSEEK-FANOUT -->"), 1)
-        self.assertEqual(first.count("<!-- END CODEX-DEEPSEEK-FANOUT -->"), 1)
+        self.assertEqual(first.count("<!-- BEGIN CODEX-MULTI-RELAY -->"), 1)
+        self.assertEqual(first.count("<!-- END CODEX-MULTI-RELAY -->"), 1)
 
     def test_remove_deletes_only_the_managed_block(self) -> None:
         original = "# My rules\n\nKeep this text.\n"
@@ -49,7 +50,7 @@ class FanoutInstructionTests(unittest.TestCase):
             "explicit `agent_type`",
             "`fork_turns=\"none\"`",
             "Never use full-history inheritance",
-            "[DeepSeek task: <target>]",
+            "[Relay task: <target>]",
             "exact complete child message",
             "before the matching `spawn_agent`",
             "followup_task",
@@ -60,6 +61,12 @@ class FanoutInstructionTests(unittest.TestCase):
             "parent verifies",
             "trivial or sequential",
             "more specific instruction",
+            "vision, audio",
+            "real MCP server",
+            "high-trust",
+            "final verification",
+            "no qualifying child",
+            "keep the task in the parent",
         )
         for meaning in required_meanings:
             with self.subTest(meaning=meaning):
@@ -70,6 +77,34 @@ class FanoutInstructionTests(unittest.TestCase):
             apply_fanout_instructions("", max_children=0)
 
         self.assertEqual(raised.exception.code, "invalid_concurrency")
+
+    def test_policy_cannot_claim_more_children_than_catalog_allows(self) -> None:
+        with self.assertRaises(ManagerError) as raised:
+            apply_fanout_instructions("", max_children=9, catalog=default_catalog())
+
+        self.assertEqual(raised.exception.code, "invalid_concurrency")
+
+    def test_policy_embeds_catalog_agents_and_capabilities(self) -> None:
+        policy = apply_fanout_instructions("", catalog=default_catalog())
+
+        for value in ("default", "worker", "explorer", "reviewer"):
+            self.assertIn(f"`{value}`", policy)
+        self.assertIn("text, tools", policy)
+        self.assertIn("text, vision, audio, tools", policy)
+        self.assertIn("trust=high", policy)
+
+    def test_apply_replaces_the_legacy_deepseek_managed_block(self) -> None:
+        legacy = """# Keep\n\n<!-- BEGIN CODEX-DEEPSEEK-FANOUT -->
+legacy managed text
+<!-- END CODEX-DEEPSEEK-FANOUT -->
+"""
+
+        applied = apply_fanout_instructions(legacy, catalog=default_catalog())
+
+        self.assertIn("# Keep", applied)
+        self.assertNotIn("legacy managed text", applied)
+        self.assertNotIn("BEGIN CODEX-DEEPSEEK-FANOUT", applied)
+        self.assertEqual(applied.count("BEGIN CODEX-MULTI-RELAY"), 1)
 
 
 if __name__ == "__main__":

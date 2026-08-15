@@ -25,6 +25,7 @@ from deepseek_fanout.bridge import (  # noqa: E402
     ChatStreamTranslator,
     _BridgeServer,
     _completion_as_chunk,
+    _explicit_agent_handoffs,
     build_chat_request,
 )
 
@@ -158,6 +159,19 @@ def _add_agent_task(
 
 
 class BridgeRequestTests(unittest.TestCase):
+    def test_bridge_accepts_new_and_legacy_protected_handoff_markers(self) -> None:
+        for label in ("Relay", "DeepSeek"):
+            with self.subTest(label=label):
+                text = (
+                    f"[{label} task: worker]\n"
+                    "Inspect module A.\n"
+                    f"[/{label} task: worker]"
+                )
+                self.assertEqual(
+                    _explicit_agent_handoffs(text),
+                    [("worker", "Inspect module A.")],
+                )
+
     def test_handoff_release_uses_a_new_bridge_process_version(self) -> None:
         self.assertEqual(BRIDGE_VERSION, 2)
 

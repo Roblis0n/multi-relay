@@ -13,6 +13,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from deepseek_fanout import ManagerError  # noqa: E402
+from deepseek_fanout.catalog import Catalog, default_catalog  # noqa: E402
 from deepseek_fanout.model_capabilities import (  # noqa: E402
     ModelSelection,
     resolve_effort,
@@ -97,6 +98,57 @@ class RoleRenderingTests(unittest.TestCase):
             render_agent("reviewer", self.selection)
 
         self.assertEqual(raised.exception.code, "invalid_role")
+
+    def test_catalog_agents_render_provider_mcp_skill_and_sandbox_overrides(self) -> None:
+        payload = default_catalog("native").to_dict()
+        payload["agents"][0].update(
+            {
+                "model": "gpt-example",
+                "reasoning_effort": "high",
+                "capabilities": ["text", "tools", "web"],
+                "mcp_servers": {
+                    "docs": {
+                        "url": "https://developers.openai.com/mcp",
+                        "env": {"MODE": "safe"},
+                        "headers": {"X-Client": "codex"},
+                    }
+                },
+                "skills": [{"path": "C:/skills/docs/SKILL.md", "enabled": False}],
+            }
+        )
+        catalog = Catalog.from_dict(payload)
+
+        parsed = tomllib.loads(render_agent(catalog.agents[0], catalog=catalog))
+
+        self.assertEqual(parsed["name"], "reviewer")
+        self.assertEqual(parsed["model"], "gpt-example")
+        self.assertNotIn("model_provider", parsed)
+        self.assertEqual(parsed["model_reasoning_effort"], "high")
+        self.assertEqual(parsed["sandbox_mode"], "read-only")
+        self.assertEqual(
+            parsed["mcp_servers"]["docs"]["url"],
+            "https://developers.openai.com/mcp",
+        )
+        self.assertEqual(parsed["mcp_servers"]["docs"]["env"], {"MODE": "safe"})
+        self.assertEqual(
+            parsed["mcp_servers"]["docs"]["headers"],
+            {"X-Client": "codex"},
+        )
+        self.assertEqual(
+            parsed["skills"]["config"],
+            [{"path": "C:/skills/docs/SKILL.md", "enabled": False}],
+        )
+
+    def test_expected_catalog_files_include_custom_agent_names(self) -> None:
+        catalog = default_catalog()
+
+        with tempfile.TemporaryDirectory() as directory:
+            files = expected_agent_files(Path(directory), catalog)
+
+        self.assertEqual(
+            {path.name for path in files},
+            {"default.toml", "worker.toml", "explorer.toml", "reviewer.toml"},
+        )
 
 
 if __name__ == "__main__":

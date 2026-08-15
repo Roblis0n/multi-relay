@@ -39,7 +39,9 @@ MAX_UPSTREAM_ERROR_BYTES = 1024 * 1024
 MAX_TOOLS = 128
 _REASONING_PREFIX = "dsr1:"
 _VALID_TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]+")
-_HANDOFF_START = re.compile(r"^\[DeepSeek task: (?P<target>[^\]\r\n]+)\][ \t]*$")
+_HANDOFF_START = re.compile(
+    r"^\[(?P<label>Relay|DeepSeek) task: (?P<target>[^\]\r\n]+)\][ \t]*$"
+)
 
 
 class BridgeError(Exception):
@@ -206,7 +208,7 @@ def _explicit_agent_handoffs(text: str) -> list[tuple[str, str]]:
             index += 1
             continue
         target = matched.group("target").strip()
-        closing = f"[/DeepSeek task: {target}]"
+        closing = f"[/{matched.group('label')} task: {target}]"
         end = index + 1
         while end < len(lines) and lines[end].strip() != closing:
             end += 1
