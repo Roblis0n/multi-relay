@@ -1,74 +1,115 @@
 ---
-name: codex-deepseek-relay
-description: Use when a user asks to configure, validate, test, repair, disable, enable, or uninstall DeepSeek as Codex native subagents, or when DeepSeek child fan-out, custom-provider routing, model availability, reasoning effort, credential-vault storage, or legacy single-agent migration is involved.
+name: codex-multi-relay
+description: Use when a user asks to configure, validate, route, test, repair, disable, enable, migrate, or uninstall Codex multi-provider child agents, including custom models, capability boundaries, provider credentials, or DeepSeek workers.
 ---
 
-# Codex DeepSeek Relay
+# Codex Multi Relay
 
-只维护 Codex 与 DeepSeek 的子代理配置。日常编码、探索和评审任务不重复运行本 Skill。
+为 Codex 配置可审计的多模型子代理目录。只在用户管理 Relay、选择子代理模型、诊断路由或处理迁移时使用；普通编码任务不重复运行本 Skill。
 
 ## 核心契约
 
-- 保持顶层主模型、主 Provider 和主模型思考强度不变。
-- 将 Codex 内置 `default`、`worker`、`explorer` 子角色统一路由到在线验证过的 `deepseek-v4-pro`。
-- 三个角色统一声明 `model_context_window = 1000000`，与 DeepSeek V4 Pro 官方上下文长度一致。
-- 逐档实测 Codex 与 Provider 共同支持的最高思考强度；没有共同配置项时省略该键并报告 Provider 默认值。
-- 默认允许 8 个并发子线程。仅对两个及以上独立、边界明确的工作项 fan-out；重叠写入、共享可变状态和顺序任务留给主代理。
-- 保持 `multi_agent_v2` 开启；每次派生子代理都显式选择 `agent_type`（`default`、`worker` 或 `explorer`）并使用 `fork_turns="none"` 或正数局部上下文，禁止因全量继承而回到 Sol 主模型。
-- 每次 `spawn_agent`、`followup_task` 或 `send_message` 前必须输出受管 `[DeepSeek task: <target>]` 可见交接块；适配层只接受精确匹配的明文交接，绝不把宿主 `gAAAA…` 密文转发给 DeepSeek。
-- Codex 只向本机 `127.0.0.1:42137` 发送 Responses；受管适配层再转换成 DeepSeek Chat Completions。它不监听局域网，也不替换正式模型目录、不关闭新版多代理、不静默回退为 OpenAI 子模型。
-- DeepSeek 作为纯文本子模型使用；由主代理先把视觉材料整理成文字事实。
+- 不修改顶层 `model`、`model_provider` 或 `model_reasoning_effort`。
+- 子代理由 `catalog.json` 独立指定 Provider、协议、模型、能力、信任级别、优先级、沙箱、MCP 和 Skill。
+- 支持 `codex-native`、`responses-compatible`、`chat-completions-compatible`、`deepseek-chat` 四种协议。
+- 默认 `hybrid` 目录把 `default`、`worker`、`explorer` 路由到 `deepseek-v4-pro`，把高信任 `reviewer` 留在原生 Codex；`native` 预设只安装原生 reviewer，不读取凭据，也不联网探测。
+- 默认最多并发 8 个子线程。只并行两个及以上相互独立、边界明确的任务；顺序依赖、重叠写入和共享可变状态留给主代理。
+- 派生子代理时必须显式设置目录中的 `agent_type`，并使用 `fork_turns="none"` 或正数局部上下文，不能用全量上下文继承代替模型路由。
+
+## 主代理能力边界
+
+派生前先列出任务所需能力，再调用 `route --capability ...`：
+
+- 目录中的子代理必须声明全部所需能力，否则任务保留在主代理。
+- `vision`、`audio`、`web` 默认属于主代理。只有子代理显式声明相应能力时才能路由；`web` 还必须具有真实可用的 MCP server。
+- `high-risk` 工作必须路由给 `trust=high` 的子代理，并由主代理做最终验证；没有合格子代理时直接返回 `parent_required`。
+- 不得静默换 Provider、换模型或降级能力。
+
+每次 `spawn_agent`、`followup_task` 或 `send_message` 前，先输出与子代理消息逐字一致的可见交接块：
+
+```text
+[Relay task: <target>]
+<exact complete child message>
+[/Relay task: <target>]
+```
+
+新配置只写入 `[Relay task]`。适配层仍识别旧 `[DeepSeek task]`，仅用于升级兼容。Chat Completions Provider 通过本机 `127.0.0.1:42137` 转换为 Codex Responses；直连 Responses Provider 不经过转换层。
 
 ## 触发后的流程
 
-1. 先运行 `status --json`。
-2. 首次配置或重新验证时运行 `setup --json`；修复请求运行 `repair --json`。
-3. 缺少凭据时，让管理器在用户本机显示掩码输入框。不要让用户在聊天中发送 Key，也不要把 Key 放进命令参数。
-4. 安装前在不复制用户认证或会话数据的隔离目录验证 Provider。随后事务写入正式配置，并由用户实际 Codex 父模型运行一次原生单代理、三路 fan-out、工具、思考内容续接和子线程续接验收；任一项失败即回滚。
-5. 最终只报告状态、模型、实际思考强度、三个角色、并发上限和备份位置。
+1. 先运行 `status --json`，确认当前状态与所有权。
+2. 首次安装选择 `setup --preset hybrid --json` 或 `setup --preset native --json`。
+3. 需要自定义模型时，先添加 Provider，再添加或替换 Agent；每次变更都会验证整个目录并以事务方式写入。
+4. 用 `route` 检查能力选择，用 `test --json` 做正式配置验收。
+5. 最终报告状态、Provider、Agent、能力边界、并发上限与备份位置，不报告或复述凭据。
+
+缺少 vault 凭据时，只允许管理器在本机显示掩码输入框。不要在聊天、配置文件、命令参数、日志或备份中接收和保存密钥。Windows 使用 Windows Credential Manager，macOS 使用 macOS Keychain；DeepSeek 的兼容目标仍为 `codex-deepseek-api-key`，其他 Provider 使用各自隔离的目标。
 
 ## 管理命令
 
-入口为 `scripts/relay.py`。Windows 使用 `py -3`，macOS 使用 `python3`：
+统一入口为 `scripts/multi_relay.py`。Windows 可用 `py -3`，macOS 可用 `python3`：
 
 ```text
-python3 <skill-dir>/scripts/relay.py status --json
-python3 <skill-dir>/scripts/relay.py setup --json
-python3 <skill-dir>/scripts/relay.py test --json
-python3 <skill-dir>/scripts/relay.py repair --json
-python3 <skill-dir>/scripts/relay.py disable --json
-python3 <skill-dir>/scripts/relay.py enable --json
-python3 <skill-dir>/scripts/relay.py uninstall --json
-python3 <skill-dir>/scripts/relay.py uninstall --remove-credential --json
+python3 <skill-dir>/scripts/multi_relay.py status --json
+python3 <skill-dir>/scripts/multi_relay.py setup --preset hybrid --json
+python3 <skill-dir>/scripts/multi_relay.py setup --preset native --json
+python3 <skill-dir>/scripts/multi_relay.py catalog --json
+python3 <skill-dir>/scripts/multi_relay.py apply --json
+python3 <skill-dir>/scripts/multi_relay.py test --json
+python3 <skill-dir>/scripts/multi_relay.py repair --json
+python3 <skill-dir>/scripts/multi_relay.py disable --json
+python3 <skill-dir>/scripts/multi_relay.py enable --json
+python3 <skill-dir>/scripts/multi_relay.py uninstall --json
+python3 <skill-dir>/scripts/multi_relay.py uninstall --remove-credential --json
+python3 <skill-dir>/scripts/multi_relay.py provider list --json
+python3 <skill-dir>/scripts/multi_relay.py agent list --json
+python3 <skill-dir>/scripts/multi_relay.py route --capability text --json
 ```
 
-- `status`：只读检查，不提示凭据，不写文件。
-- `setup` / `repair`：本地掩码收集凭据，验证模型与兼容性，事务安装并验收。
-- `test`：使用正式配置做原生验收。
-- `disable`：移除三个角色文件与 fan-out 指令，保留 Provider 和凭据。
-- `enable`：无需联网，恢复上次已验证的三个角色与 fan-out 指令。
-- `uninstall`：恢复受管配置并保留凭据；只有明确要求时才删除凭据。
-
-角色文件必须是：
+添加直连 Responses Provider：
 
 ```text
-$CODEX_HOME/agents/default.toml
-$CODEX_HOME/agents/worker.toml
-$CODEX_HOME/agents/explorer.toml
+python3 <skill-dir>/scripts/multi_relay.py provider add --id vendor --name Vendor --protocol responses-compatible --base-url https://api.vendor.example/v1 --auth vault --capability text --capability tools --context-window 128000 --json
 ```
 
-凭据目标必须是 Windows Credential Manager 或 macOS Keychain 中的 `codex-deepseek-api-key`。
+添加 Chat Completions Provider 时将 `--protocol` 改为 `chat-completions-compatible`；DeepSeek 兼容端使用 `deepseek-chat`；原生 Codex 使用 `codex-native --auth codex` 且不填写 `--base-url`。
+
+添加或替换子代理：
+
+```text
+python3 <skill-dir>/scripts/multi_relay.py agent set --name vendor-worker --description "Vendor implementation worker" --provider vendor --model vendor-model --reasoning-effort high --context-window 128000 --capability text --capability tools --sandbox-mode workspace-write --instructions "Implement only the assigned bounded task." --json
+```
+
+移除前先解除引用：
+
+```text
+python3 <skill-dir>/scripts/multi_relay.py agent remove vendor-worker --json
+python3 <skill-dir>/scripts/multi_relay.py provider remove vendor --json
+```
+
+`provider remove` 会拒绝仍被 Agent 使用的 Provider。只有明确要求时才加 `--remove-credential`。
+
+## 受管文件
+
+- `$CODEX_HOME/codex-multi-relay/catalog.json`：无密钥的 Provider 与 Agent 目录。
+- `$CODEX_HOME/codex-multi-relay/manifest.json`：所有权、哈希、状态和回滚信息。
+- `$CODEX_HOME/agents/<agent>.toml`：按目录生成，例如 `default.toml`、`worker.toml`、`explorer.toml`、`reviewer.toml`。
+- `$CODEX_HOME/config.toml`：只写受管 Provider 块与 `multi_agent_v2` 路由开关，不改变主模型三键。
+- `$CODEX_HOME/AGENTS.md`：只写能力路由与可见交接规则。
+
+旧 `$CODEX_HOME/codex-deepseek-relay`、`$CODEX_HOME/codex-deepseek-subagent` 以及旧 marker 只作为有 manifest 所有权证明时的迁移来源。没有证明时必须返回 `conflict`，不得接管相似的用户内容。
 
 ## 状态处理
 
-- `ready`：模型、隔离 Provider 门禁、正式原生验收和静态配置均通过。
+- `ready`：目录、配置、角色与适用验收均通过。
+- `disabled`：保留目录、Provider 和凭据；目录变更不得隐式启用，只有 `enable` 恢复角色与路由指令。
+- `parent_required`：没有满足全部能力或信任边界的子代理，任务留给主代理。
 - `not_configured`：尚未安装。
 - `legacy` / `legacy_requires_setup`：先运行 `setup` 或 `repair` 完成受校验迁移，再执行其他生命周期操作。
-- `credential_missing`：引导用户直接运行 `setup`，由本机掩码输入框收集。
-- `model_unavailable`：明确说明 `deepseek-v4-pro` 当前不可用；不安装近似名称或占位模型。
-- `compatibility_failed`：报告失败检查项；正式写入前失败则不改配置，写入后失败则回滚。
+- `credential_missing`：运行相应 setup/provider 命令，通过本机掩码输入保存。
+- `model_unavailable`：停止，不猜测近似模型名。
+- `compatibility_failed`：报告失败检查项；事务失败必须回滚。
 - `conflict`：报告用户自有冲突文件；不要覆盖。
-- `disabled`：保留 Provider 与凭据，可运行 `enable` 恢复。
 - `operation_in_progress`：稍后重试，不并发修改。
 
-详细文件边界、验收证据和回滚规则见 [references/compatibility.md](references/compatibility.md)。
+协议细节、边界、迁移与回滚规则见 [references/compatibility.md](references/compatibility.md)。

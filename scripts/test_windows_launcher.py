@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = PROJECT_ROOT / "configure-relay.cmd"
+LAUNCHER = PROJECT_ROOT / "configure-multi-relay.cmd"
 
 
 @unittest.skipUnless(os.name == "nt", "Windows launcher test")
@@ -36,10 +36,10 @@ class WindowsLauncherTests(unittest.TestCase):
                     str(Path(os.environ["SystemRoot"]) / "System32"),
                 ]
             )
-            environment["DEEPSEEK_MANAGER"] = str(fake_manager)
+            environment["MULTI_RELAY_MANAGER"] = str(fake_manager)
             environment["CODEX_HOME"] = str(codex_home)
-            environment["DEEPSEEK_NO_PAUSE"] = "1"
-            environment.pop("DEEPSEEK_PYTHON", None)
+            environment["MULTI_RELAY_NO_PAUSE"] = "1"
+            environment.pop("MULTI_RELAY_PYTHON", None)
 
             completed = subprocess.run(
                 ["cmd.exe", "/d", "/c", str(LAUNCHER)],
@@ -59,6 +59,12 @@ class WindowsLauncherTests(unittest.TestCase):
             + json.dumps(["setup", "--codex-home", str(codex_home)]),
             completed.stdout,
         )
+
+    def test_launcher_retains_deepseek_environment_aliases(self) -> None:
+        text = LAUNCHER.read_text(encoding="utf-8")
+        for legacy in ("DEEPSEEK_MANAGER", "DEEPSEEK_PYTHON", "DEEPSEEK_NO_PAUSE"):
+            with self.subTest(legacy=legacy):
+                self.assertIn(legacy, text)
 
 
 if __name__ == "__main__":

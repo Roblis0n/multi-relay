@@ -6,9 +6,11 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import tomllib
 import unittest
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,14 +18,15 @@ from types import SimpleNamespace
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout.compatibility import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay.catalog import ProviderSpec  # noqa: E402
+from multi_relay.compatibility import (  # noqa: E402
     probe_efforts,
     run_isolated_gate,
 )
-from deepseek_fanout.model_capabilities import ModelSelection  # noqa: E402
-from deepseek_fanout.native_test import _prompt as _native_prompt  # noqa: E402
-from deepseek_fanout.provider_api import discover_model  # noqa: E402
+from multi_relay.model_capabilities import ModelSelection  # noqa: E402
+from multi_relay.native_test import _prompt as _native_prompt  # noqa: E402
+from multi_relay.provider_api import discover_model  # noqa: E402
 
 
 class FakeHttpResponse:
@@ -41,6 +44,231 @@ class FakeHttpResponse:
 
 
 class ProviderModelTests(unittest.TestCase):
+    def test_malformed_redirect_is_reported_as_provider_unavailable(self) -> None:
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:not-a-port/models")
+                self.end_headers()
+
+            def log_message(self, *args: object) -> None:
+                return None
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+        redirect_thread.start()
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "responses-compatible",
+                "base_url": f"http://127.0.0.1:{redirect.server_address[1]}/v1",
+                "auth": "vault",
+                "capabilities": ["text"],
+                "context_window": 32000,
+                "enabled": True,
+            }
+        )
+        try:
+            with self.assertRaises(ManagerError) as raised:
+                discover_model("provider-token", "vendor-model", provider=provider)
+        finally:
+            redirect.shutdown()
+            redirect.server_close()
+            redirect_thread.join(timeout=2)
+
+        self.assertEqual(raised.exception.code, "provider_unavailable")
+
+    def test_model_discovery_closes_http_error_responses(self) -> None:
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "responses-compatible",
+                "base_url": "https://models.example.test/v1",
+                "auth": "vault",
+                "capabilities": ["text"],
+                "context_window": 32000,
+                "enabled": True,
+            }
+        )
+        response_body = io.BytesIO(b"redirect blocked")
+        failure = urllib.error.HTTPError(
+            "https://models.example.test/v1/models",
+            302,
+            "redirect blocked",
+            {},
+            response_body,
+        )
+
+        def opener(request: object, **kwargs: object) -> FakeHttpResponse:
+            raise failure
+
+        with self.assertRaises(ManagerError):
+            discover_model(
+                "provider-token",
+                "vendor-model",
+                provider=provider,
+                opener=opener,
+            )
+
+        self.assertTrue(response_body.closed)
+
+    def test_cross_origin_redirect_is_blocked_without_forwarding_authorization(self) -> None:
+        sink_headers: list[str | None] = []
+
+        class SinkHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                sink_headers.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"data":[{"id":"vendor-model"}]}')
+
+            def log_message(self, *args: object) -> None:
+                return None
+
+        sink = ThreadingHTTPServer(("127.0.0.1", 0), SinkHandler)
+        sink_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        sink_thread.start()
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(302)
+                self.send_header(
+                    "Location",
+                    f"http://127.0.0.1:{sink.server_address[1]}/models",
+                )
+                self.end_headers()
+
+            def log_message(self, *args: object) -> None:
+                return None
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
+        redirect_thread.start()
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "responses-compatible",
+                "base_url": f"http://127.0.0.1:{redirect.server_address[1]}/v1",
+                "auth": "vault",
+                "capabilities": ["text"],
+                "context_window": 32000,
+                "enabled": True,
+            }
+        )
+        try:
+            with self.assertRaises(ManagerError) as raised:
+                discover_model("provider-token", "vendor-model", provider=provider)
+        finally:
+            redirect.shutdown()
+            sink.shutdown()
+            redirect.server_close()
+            sink.server_close()
+            redirect_thread.join(timeout=2)
+            sink_thread.join(timeout=2)
+
+        self.assertEqual(raised.exception.code, "provider_unavailable")
+        self.assertEqual(sink_headers, [])
+
+    def test_discover_model_rejects_non_string_keys_and_padded_model_ids(self) -> None:
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "responses-compatible",
+                "base_url": "https://models.example.test/v1",
+                "auth": "vault",
+                "capabilities": ["text"],
+                "context_window": 32000,
+                "enabled": True,
+            }
+        )
+        for key in (None, 123, object()):
+            with self.subTest(key=key):
+                with self.assertRaises(ManagerError) as raised:
+                    discover_model(key, "vendor-model", provider=provider)  # type: ignore[arg-type]
+                self.assertEqual(raised.exception.code, "invalid_api_key")
+        with self.assertRaises(ManagerError) as raised:
+            discover_model("provider-token", " vendor-model ", provider=provider)
+        self.assertEqual(raised.exception.code, "invalid_model")
+
+    def test_discovery_is_scoped_to_the_configured_provider_endpoint(self) -> None:
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "responses-compatible",
+                "base_url": "https://models.example.test/v1",
+                "auth": "vault",
+                "capabilities": ["text", "tools"],
+                "context_window": 128000,
+                "enabled": True,
+            }
+        )
+        seen: list[object] = []
+
+        def opener(request: object, **kwargs: object) -> FakeHttpResponse:
+            seen.append(request)
+            return FakeHttpResponse({"data": [{"id": "vendor-model"}]})
+
+        resolved = discover_model(
+            "provider-token",
+            "vendor-model",
+            provider=provider,
+            opener=opener,
+        )
+
+        self.assertEqual(resolved, "vendor-model")
+        self.assertEqual(seen[0].full_url, "https://models.example.test/v1/models")
+        self.assertEqual(seen[0].get_header("Authorization"), "Bearer provider-token")
+
+    def test_discovery_supports_unauthenticated_local_or_https_catalogs(self) -> None:
+        provider = ProviderSpec.from_dict(
+            {
+                "id": "public",
+                "name": "Public",
+                "protocol": "responses-compatible",
+                "base_url": "https://public.example.test/v1",
+                "auth": "none",
+                "capabilities": ["text"],
+                "context_window": 32000,
+                "enabled": True,
+            }
+        )
+        seen: list[object] = []
+
+        def opener(request: object, **kwargs: object) -> FakeHttpResponse:
+            seen.append(request)
+            return FakeHttpResponse({"data": [{"id": "public-model"}]})
+
+        self.assertEqual(
+            discover_model("", "public-model", provider=provider, opener=opener),
+            "public-model",
+        )
+        self.assertIsNone(seen[0].get_header("Authorization"))
+
+    def test_native_provider_uses_codex_catalog_instead_of_http_discovery(self) -> None:
+        native = ProviderSpec.from_dict(
+            {
+                "id": "codex",
+                "name": "Native Codex",
+                "protocol": "codex-native",
+                "base_url": None,
+                "auth": "codex",
+                "capabilities": ["text", "tools"],
+                "context_window": None,
+                "enabled": True,
+            }
+        )
+
+        with self.assertRaises(ManagerError) as raised:
+            discover_model("", "gpt-example", provider=native)
+
+        self.assertEqual(raised.exception.code, "provider_unavailable")
+
     def test_discover_model_returns_exact_provider_model(self) -> None:
         payload = {
             "object": "list",

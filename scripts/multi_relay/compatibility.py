@@ -187,7 +187,7 @@ def run_isolated_gate(
     if not config_path.is_file():
         raise ManagerError("config_missing", "Codex config.toml was not found.")
     minimal_parent, parent = _isolated_parent_config(selection)
-    with tempfile.TemporaryDirectory(prefix="codex-deepseek-gate-") as directory:
+    with tempfile.TemporaryDirectory(prefix="codex-multi-relay-gate-") as directory:
         home = Path(directory).resolve()
         paths = resolve_paths(str(home))
         candidate = apply_codex_config(minimal_parent, provider_auth_command())

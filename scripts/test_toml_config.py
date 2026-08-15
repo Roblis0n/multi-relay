@@ -11,13 +11,15 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout.toml_config import (  # noqa: E402
+from multi_relay.catalog import Catalog  # noqa: E402
+from multi_relay.toml_config import (  # noqa: E402
     apply_codex_config,
+    build_provider_blocks,
     capture_managed_values,
     remove_codex_config,
     validate_parent_unchanged,
 )
-from deepseek_fanout import ManagerError  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
 
 
 class TomlConfigTests(unittest.TestCase):
@@ -26,6 +28,175 @@ class TomlConfigTests(unittest.TestCase):
             r"C:\Program Files\Python\python.exe",
             r"F:\Skill\Codex\credential_helper.py",
         ]
+
+    @staticmethod
+    def multi_catalog() -> Catalog:
+        return Catalog.from_dict(
+            {
+                "schema_version": 1,
+                "concurrency": 9,
+                "providers": [
+                    {
+                        "id": "codex",
+                        "name": "Native Codex",
+                        "protocol": "codex-native",
+                        "base_url": None,
+                        "auth": "codex",
+                        "capabilities": ["text", "vision", "audio", "tools"],
+                        "context_window": None,
+                        "enabled": True,
+                    },
+                    {
+                        "id": "responses",
+                        "name": "Responses Direct",
+                        "protocol": "responses-compatible",
+                        "base_url": "https://responses.example.test/v1",
+                        "auth": "none",
+                        "capabilities": ["text", "tools"],
+                        "context_window": 200000,
+                        "enabled": True,
+                    },
+                    {
+                        "id": "chat",
+                        "name": "Generic Chat",
+                        "protocol": "chat-completions-compatible",
+                        "base_url": "https://chat.example.test/v1",
+                        "auth": "vault",
+                        "capabilities": ["text", "tools"],
+                        "context_window": 128000,
+                        "enabled": True,
+                    },
+                    {
+                        "id": "deepseek",
+                        "name": "DeepSeek",
+                        "protocol": "deepseek-chat",
+                        "base_url": "https://api.deepseek.com/v1",
+                        "auth": "vault",
+                        "capabilities": ["text", "tools"],
+                        "context_window": 1000000,
+                        "enabled": True,
+                    },
+                ],
+                "agents": [
+                    {
+                        "name": "reviewer",
+                        "description": "review",
+                        "provider": "codex",
+                        "model": None,
+                        "reasoning_effort": None,
+                        "context_window": None,
+                        "capabilities": ["text", "tools"],
+                        "trust": "high",
+                        "priority": 1,
+                        "sandbox_mode": "read-only",
+                        "mcp_servers": {},
+                        "skills": [],
+                        "developer_instructions": "Review.",
+                    }
+                ],
+            }
+        )
+
+    def test_catalog_provider_blocks_use_direct_and_provider_addressed_routes(self) -> None:
+        seen: list[tuple[str, bool]] = []
+
+        def auth_factory(provider_id: str, start_bridge: bool) -> list[str]:
+            seen.append((provider_id, start_bridge))
+            return ["python", "helper.py", "--provider", provider_id]
+
+        rendered = build_provider_blocks(self.multi_catalog(), auth_factory)
+        parsed = tomllib.loads(rendered)
+
+        self.assertNotIn("codex", parsed.get("model_providers", {}))
+        self.assertEqual(
+            parsed["model_providers"]["responses"]["base_url"],
+            "https://responses.example.test/v1",
+        )
+        self.assertNotIn("auth", parsed["model_providers"]["responses"])
+        self.assertEqual(
+            parsed["model_providers"]["chat"]["base_url"],
+            "http://127.0.0.1:42137/v1/providers/chat",
+        )
+        self.assertEqual(
+            parsed["model_providers"]["deepseek"]["base_url"],
+            "http://127.0.0.1:42137/v1/providers/deepseek",
+        )
+        self.assertEqual(seen, [("chat", True), ("deepseek", True)])
+        self.assertEqual(rendered.count("# BEGIN CODEX-MULTI-RELAY PROVIDERS"), 1)
+
+    def test_responses_vault_auth_uses_helper_without_starting_bridge(self) -> None:
+        payload = self.multi_catalog().to_dict()
+        payload["providers"] = [
+            {**payload["providers"][1], "auth": "vault"}
+        ]
+        payload["agents"] = [
+            {
+                **payload["agents"][0],
+                "provider": "responses",
+                "model": "responses-model",
+            }
+        ]
+        catalog = Catalog.from_dict(payload)
+        calls: list[tuple[str, bool]] = []
+
+        build_provider_blocks(
+            catalog,
+            lambda provider_id, start_bridge: (
+                calls.append((provider_id, start_bridge)) or ["helper", provider_id]
+            ),
+        )
+
+        self.assertEqual(calls, [("responses", False)])
+
+    def test_native_only_catalog_emits_no_provider_marker(self) -> None:
+        payload = self.multi_catalog().to_dict()
+        payload["providers"] = [payload["providers"][0]]
+        payload["agents"] = [payload["agents"][0]]
+        catalog = Catalog.from_dict(payload)
+
+        candidate = apply_codex_config("", catalog)
+
+        self.assertNotIn("CODEX-MULTI-RELAY PROVIDERS", candidate)
+        self.assertNotIn("model_providers", tomllib.loads(candidate))
+
+    def test_catalog_apply_is_idempotent_and_preserves_parent(self) -> None:
+        original = 'model = "gpt-parent"\nmodel_provider = "openai"\n'
+        factory = lambda provider_id, start_bridge: ["helper", provider_id]
+
+        first = apply_codex_config(
+            original,
+            self.multi_catalog(),
+            auth_command_factory=factory,
+        )
+        second = apply_codex_config(
+            first,
+            self.multi_catalog(),
+            auth_command_factory=factory,
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(tomllib.loads(first)["model"], "gpt-parent")
+        self.assertEqual(
+            tomllib.loads(first)["agents"]["max_concurrent_threads_per_session"],
+            9,
+        )
+
+    def test_catalog_apply_removes_legacy_owned_provider_block(self) -> None:
+        legacy = (
+            "# BEGIN CODEX-DEEPSEEK-FANOUT PROVIDER\n"
+            "[model_providers.deepseek]\n"
+            'name = "old"\n'
+            "# END CODEX-DEEPSEEK-FANOUT PROVIDER\n"
+        )
+
+        candidate = apply_codex_config(
+            legacy,
+            self.multi_catalog(),
+            auth_command_factory=lambda provider_id, start_bridge: ["helper", provider_id],
+        )
+
+        self.assertNotIn("CODEX-DEEPSEEK-FANOUT", candidate)
+        self.assertEqual(candidate.count("[model_providers.deepseek]\n"), 1)
 
     def test_apply_preserves_parent_and_enables_eight_native_children(self) -> None:
         original = (

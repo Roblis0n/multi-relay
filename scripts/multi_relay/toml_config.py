@@ -5,14 +5,22 @@ from __future__ import annotations
 import json
 import re
 import tomllib
+from collections.abc import Callable
 from typing import Any
 
 from .bridge import BRIDGE_BASE_URL
+from .catalog import Catalog
 from .errors import ManagerError
 
 
-PROVIDER_BEGIN = "# BEGIN CODEX-DEEPSEEK-FANOUT PROVIDER"
-PROVIDER_END = "# END CODEX-DEEPSEEK-FANOUT PROVIDER"
+PROVIDER_BEGIN = "# BEGIN CODEX-MULTI-RELAY PROVIDERS"
+PROVIDER_END = "# END CODEX-MULTI-RELAY PROVIDERS"
+LEGACY_PROVIDER_MARKERS = (
+    (
+        "# BEGIN CODEX-DEEPSEEK-FANOUT PROVIDER",
+        "# END CODEX-DEEPSEEK-FANOUT PROVIDER",
+    ),
+)
 _PARENT_KEYS = ("model", "model_provider", "model_reasoning_effort")
 _V2_KEYS = (
     "enabled",
@@ -131,30 +139,84 @@ def _remove_empty_table(text: str, table: str) -> str:
 
 def _remove_provider_block(text: str) -> str:
     normalized = _normalize(text)
-    pattern = re.compile(
-        rf"(?ms)^\s*{re.escape(PROVIDER_BEGIN)}\s*\n.*?^\s*{re.escape(PROVIDER_END)}\s*(?:\n|$)"
-    )
-    return pattern.sub("", normalized).rstrip() + ("\n" if normalized.strip() else "")
+    removed = normalized
+    for begin, end in ((PROVIDER_BEGIN, PROVIDER_END), *LEGACY_PROVIDER_MARKERS):
+        pattern = re.compile(
+            rf"(?ms)^\s*{re.escape(begin)}\s*\n.*?^\s*{re.escape(end)}\s*(?:\n|$)"
+        )
+        removed = pattern.sub("", removed)
+    return removed.rstrip() + ("\n" if removed.strip() else "")
+
+
+def _provider_auth_lines(auth_command: list[str]) -> list[str]:
+    if not auth_command or not all(isinstance(part, str) and part for part in auth_command):
+        raise ManagerError("invalid_auth_command", "Provider auth command is incomplete.")
+    command, *args = auth_command
+    return [
+        f"command = {_toml_string(command)}",
+        f"args = {_toml_array(args)}",
+        "timeout_ms = 5000",
+        "refresh_interval_ms = 0",
+    ]
+
+
+def build_provider_blocks(
+    catalog: Catalog,
+    auth_command_factory: Callable[[str, bool], list[str]] | None = None,
+) -> str:
+    """Render enabled non-native providers from the validated catalog."""
+
+    sections: list[str] = []
+    for provider in catalog.providers:
+        if not provider.enabled or provider.protocol == "codex-native":
+            continue
+        if provider.protocol == "responses-compatible":
+            base_url = provider.base_url
+            start_bridge = False
+        else:
+            base_url = f"{BRIDGE_BASE_URL}/providers/{provider.id}"
+            start_bridge = True
+        if base_url is None:
+            raise ManagerError(
+                "catalog_invalid",
+                f"Provider {provider.id} has no usable base URL.",
+                {"provider": provider.id},
+            )
+        lines = [
+            f"[model_providers.{provider.id}]",
+            f"name = {_toml_string(provider.name)}",
+            f"base_url = {_toml_string(base_url)}",
+            'wire_api = "responses"',
+        ]
+        if provider.auth == "vault":
+            if auth_command_factory is None:
+                raise ManagerError(
+                    "invalid_auth_command",
+                    f"Provider {provider.id} requires a credential helper.",
+                    {"provider": provider.id},
+                )
+            lines.extend(["", f"[model_providers.{provider.id}.auth]"])
+            lines.extend(_provider_auth_lines(auth_command_factory(provider.id, start_bridge)))
+        sections.append("\n".join(lines))
+    if not sections:
+        return ""
+    return f"{PROVIDER_BEGIN}\n" + "\n\n".join(sections) + f"\n{PROVIDER_END}\n"
 
 
 def build_provider_block(auth_command: list[str]) -> str:
     """Render the command-authenticated DeepSeek Responses provider."""
 
-    if not auth_command or not all(isinstance(part, str) and part for part in auth_command):
-        raise ManagerError("invalid_auth_command", "Provider auth command is incomplete.")
-    command, *args = auth_command
+    begin, end = LEGACY_PROVIDER_MARKERS[0]
+    auth_lines = _provider_auth_lines(auth_command)
     return (
-        f"{PROVIDER_BEGIN}\n"
+        f"{begin}\n"
         "[model_providers.deepseek]\n"
         'name = "DeepSeek"\n'
         f"base_url = {_toml_string(BRIDGE_BASE_URL)}\n"
         'wire_api = "responses"\n\n'
         "[model_providers.deepseek.auth]\n"
-        f"command = {_toml_string(command)}\n"
-        f"args = {_toml_array(args)}\n"
-        "timeout_ms = 5000\n"
-        "refresh_interval_ms = 0\n"
-        f"{PROVIDER_END}\n"
+        + "\n".join(auth_lines)
+        + f"\n{end}\n"
     )
 
 
@@ -228,12 +290,23 @@ def capture_managed_values(text: str) -> dict[str, Any]:
 
 def apply_codex_config(
     original: str,
-    auth_command: list[str],
-    concurrency: int = 8,
+    auth_command: list[str] | Catalog,
+    concurrency: int | None = None,
+    *,
+    auth_command_factory: Callable[[str, bool], list[str]] | None = None,
 ) -> str:
     """Build a valid candidate config while preserving the parent selection."""
 
-    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+    selected_concurrency = (
+        auth_command.concurrency
+        if isinstance(auth_command, Catalog) and concurrency is None
+        else (8 if concurrency is None else concurrency)
+    )
+    if (
+        isinstance(selected_concurrency, bool)
+        or not isinstance(selected_concurrency, int)
+        or selected_concurrency < 1
+    ):
         raise ManagerError("invalid_concurrency", "Concurrency must be a positive integer.")
     normalized = _normalize(original)
     parsed = _parse(normalized)
@@ -248,9 +321,9 @@ def apply_codex_config(
         else None
     )
     effective_limit = (
-        max(concurrency, existing_limit)
+        max(selected_concurrency, existing_limit)
         if isinstance(existing_limit, int) and not isinstance(existing_limit, bool)
-        else concurrency
+        else selected_concurrency
     )
     existing_v2_limit = (
         existing_v2.get("max_concurrent_threads_per_session")
@@ -258,10 +331,10 @@ def apply_codex_config(
         else None
     )
     effective_v2_limit = (
-        max(concurrency, existing_v2_limit)
+        max(selected_concurrency, existing_v2_limit)
         if isinstance(existing_v2_limit, int)
         and not isinstance(existing_v2_limit, bool)
-        else concurrency
+        else selected_concurrency
     )
 
     candidate = _remove_provider_block(normalized)
@@ -298,7 +371,13 @@ def apply_codex_config(
         "max_concurrent_threads_per_session",
         str(effective_limit),
     )
-    candidate = candidate.rstrip() + "\n\n" + build_provider_block(auth_command)
+    provider_block = (
+        build_provider_blocks(auth_command, auth_command_factory)
+        if isinstance(auth_command, Catalog)
+        else build_provider_block(auth_command)
+    )
+    if provider_block:
+        candidate = candidate.rstrip() + "\n\n" + provider_block
     _parse(candidate)
     validate_parent_unchanged(normalized, candidate)
     return candidate

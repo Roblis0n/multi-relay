@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback Responses-to-Chat bridge for Codex and DeepSeek V4."""
+"""Loopback Responses-to-Chat bridge for Codex Multi Relay providers."""
 
 from __future__ import annotations
 
@@ -25,19 +25,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from multi_relay.catalog import Catalog, ProviderSpec, load_catalog
+    from multi_relay.errors import ManagerError
+else:
+    from .catalog import Catalog, ProviderSpec, load_catalog
+    from .errors import ManagerError
+
 
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 42137
 BRIDGE_BASE_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/v1"
 BRIDGE_HEALTH_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/health"
-BRIDGE_SERVICE = "codex-deepseek-responses-bridge"
-BRIDGE_VERSION = 2
+BRIDGE_SERVICE = "codex-multi-relay-chat-bridge"
+LEGACY_BRIDGE_SERVICE = "codex-deepseek-responses-bridge"
+BRIDGE_VERSION = 3
 DEEPSEEK_CHAT_URL = "https://api.deepseek.com/chat/completions"
 REQUIRED_MODEL = "deepseek-v4-pro"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 MAX_UPSTREAM_ERROR_BYTES = 1024 * 1024
 MAX_TOOLS = 128
-_REASONING_PREFIX = "dsr1:"
+_REASONING_PREFIX = "cmr1:"
+_LEGACY_REASONING_PREFIX = "dsr1:"
 _VALID_TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 _HANDOFF_START = re.compile(
     r"^\[(?P<label>Relay|DeepSeek) task: (?P<target>[^\]\r\n]+)\][ \t]*$"
@@ -51,37 +61,92 @@ class BridgeError(Exception):
         self.status = status
 
 
-def _validate_upstream_url(value: str) -> str:
-    """Permit only the official DeepSeek API or an explicit loopback fixture."""
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward a provider credential through an HTTP redirect."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            "Provider redirect blocked",
+            headers,
+            fp,
+        )
+
+
+def _open_upstream(request: urllib.request.Request, *, timeout: float) -> Any:
+    return urllib.request.build_opener(_RejectRedirectHandler()).open(
+        request,
+        timeout=timeout,
+    )
+
+
+def _validate_upstream_url(
+    value: str,
+    provider: ProviderSpec | None = None,
+) -> str:
+    """Validate a configured chat endpoint without allowing URL credential smuggling."""
 
     try:
         parsed = urllib.parse.urlsplit(value)
         port = parsed.port
     except ValueError:
-        raise BridgeError("invalid_upstream_url", "The DeepSeek upstream URL is invalid.", 500) from None
+        raise BridgeError("invalid_upstream_url", "The provider upstream URL is invalid.", 500) from None
+    expected_path = (
+        parsed.path == "/chat/completions"
+        if provider is None
+        else parsed.path.endswith("/chat/completions")
+    )
     no_credential_or_suffix = (
         parsed.username is None
         and parsed.password is None
         and not parsed.query
         and not parsed.fragment
-        and parsed.path == "/chat/completions"
+        and expected_path
     )
-    official = (
-        parsed.scheme == "https"
-        and parsed.hostname == "api.deepseek.com"
-        and port in {None, 443}
-    )
+    official = parsed.scheme == "https" and parsed.hostname == "api.deepseek.com" and port in {None, 443}
+    secure_custom = parsed.scheme == "https" and parsed.hostname is not None
     loopback_fixture = (
         parsed.scheme == "http"
         and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
     )
-    if not no_credential_or_suffix or not (official or loopback_fixture):
+    allowed_network = (
+        official or loopback_fixture
+        if provider is None
+        else secure_custom or loopback_fixture
+    )
+    if not no_credential_or_suffix or not allowed_network:
         raise BridgeError(
             "invalid_upstream_url",
-            "The bridge only connects to the official DeepSeek API.",
+            "The bridge requires a configured HTTPS chat endpoint or a loopback fixture.",
             500,
         )
     return value
+
+
+def _chat_completions_url(provider: ProviderSpec) -> str:
+    if provider.base_url is None:
+        raise BridgeError(
+            "invalid_upstream_url",
+            f"Provider {provider.id} has no chat base URL.",
+            500,
+        )
+    base_url = provider.base_url.rstrip("/")
+    base_path = urllib.parse.urlsplit(base_url).path.rstrip("/")
+    endpoint = (
+        base_url
+        if base_path.endswith("/chat/completions")
+        else f"{base_url}/chat/completions"
+    )
+    return _validate_upstream_url(endpoint, provider)
 
 
 @dataclass(frozen=True)
@@ -97,6 +162,13 @@ class ToolRoute:
 class ChatRequest:
     payload: dict[str, Any]
     tools: dict[str, ToolRoute]
+
+
+@dataclass(frozen=True)
+class BridgeRoute:
+    provider: ProviderSpec
+    upstream_url: str
+    allowed_models: frozenset[str]
 
 
 def _text_value(value: object) -> str:
@@ -121,7 +193,7 @@ def _text_value(value: object) -> str:
             if item_type in {"input_image", "input_audio", "input_file"}:
                 raise BridgeError(
                     "unsupported_media",
-                    "DeepSeek child agents are configured for text-only input.",
+                    "The selected Chat Completions child agent is configured for text-only input.",
                 )
             raise BridgeError(
                 "unsupported_content",
@@ -328,6 +400,7 @@ def _resolve_agent_task(
     recipient: str,
     encrypted_content: str,
     codex_home: Path | None = None,
+    provider_id: str = "deepseek",
 ) -> str:
     home = codex_home or Path(
         os.environ.get("CODEX_HOME") or Path.home() / ".codex"
@@ -347,7 +420,7 @@ def _resolve_agent_task(
                 "SELECT id, rollout_path, source FROM threads "
                 "WHERE model_provider = ? AND agent_path = ? "
                 "ORDER BY created_at_ms DESC",
-                ("deepseek", recipient),
+                (provider_id, recipient),
             ).fetchall()
             for child_id, child_rollout, source in rows:
                 child_path = Path(str(child_rollout))
@@ -400,6 +473,7 @@ def _agent_message_content(
     author: str,
     recipient: str,
     codex_home: Path | None,
+    provider_id: str,
 ) -> str:
     if not isinstance(value, list):
         return _text_value(value)
@@ -427,12 +501,22 @@ def _agent_message_content(
             recipient=recipient,
             encrypted_content=encrypted[0],
             codex_home=codex_home,
+            provider_id=provider_id,
         )
     )
     return "\n".join(part for part in parts if part)
 
 
-def _reasoning_key(secret: str) -> bytes:
+def _reasoning_key(secret: str, provider_id: str) -> bytes:
+    return hashlib.sha256(
+        b"codex-multi-relay-reasoning-v1\0"
+        + provider_id.encode("utf-8")
+        + b"\0"
+        + secret.encode("utf-8")
+    ).digest()
+
+
+def _legacy_reasoning_key(secret: str) -> bytes:
     return hashlib.sha256(b"codex-deepseek-reasoning-v1\0" + secret.encode("utf-8")).digest()
 
 
@@ -447,10 +531,10 @@ def _reasoning_keystream(key: bytes, nonce: bytes, length: int) -> bytes:
     return bytes(output[:length])
 
 
-def _seal_reasoning(text: str, secret: str) -> str:
+def _seal_reasoning(text: str, secret: str, provider_id: str = "deepseek") -> str:
     raw = text.encode("utf-8")
     nonce = os.urandom(16)
-    key = _reasoning_key(secret)
+    key = _reasoning_key(secret, provider_id)
     stream = _reasoning_keystream(key, nonce, len(raw))
     ciphertext = bytes(left ^ right for left, right in zip(raw, stream))
     tag = hmac.new(key, b"tag\0" + nonce + ciphertext, hashlib.sha256).digest()[:16]
@@ -458,19 +542,54 @@ def _seal_reasoning(text: str, secret: str) -> str:
     return _REASONING_PREFIX + token
 
 
-def _open_reasoning(value: object, secret: str | None) -> str | None:
-    if not isinstance(value, str) or not value.startswith(_REASONING_PREFIX):
+def _seal_legacy_reasoning(text: str, secret: str) -> str:
+    """Create the former DeepSeek token only for compatibility verification."""
+
+    raw = text.encode("utf-8")
+    nonce = os.urandom(16)
+    key = _legacy_reasoning_key(secret)
+    stream = _reasoning_keystream(key, nonce, len(raw))
+    ciphertext = bytes(left ^ right for left, right in zip(raw, stream))
+    tag = hmac.new(key, b"tag\0" + nonce + ciphertext, hashlib.sha256).digest()[:16]
+    token = base64.urlsafe_b64encode(nonce + tag + ciphertext).decode("ascii")
+    return _LEGACY_REASONING_PREFIX + token
+
+
+def _open_reasoning(
+    value: object,
+    secret: str | None,
+    provider_id: str = "deepseek",
+    *,
+    allow_legacy: bool | None = None,
+) -> str | None:
+    if not isinstance(value, str) or not value.startswith(
+        (_REASONING_PREFIX, _LEGACY_REASONING_PREFIX)
+    ):
         return None
     if not secret:
         raise BridgeError("reasoning_key_missing", "DeepSeek reasoning replay key is unavailable.")
     try:
-        sealed = base64.urlsafe_b64decode(value[len(_REASONING_PREFIX) :].encode("ascii"))
+        prefix = (
+            _REASONING_PREFIX
+            if value.startswith(_REASONING_PREFIX)
+            else _LEGACY_REASONING_PREFIX
+        )
+        sealed = base64.urlsafe_b64decode(value[len(prefix) :].encode("ascii"))
     except (ValueError, UnicodeEncodeError):
         raise BridgeError("invalid_reasoning", "DeepSeek reasoning replay data is invalid.") from None
     if len(sealed) < 32:
         raise BridgeError("invalid_reasoning", "DeepSeek reasoning replay data is invalid.")
     nonce, tag, ciphertext = sealed[:16], sealed[16:32], sealed[32:]
-    key = _reasoning_key(secret)
+    if prefix == _LEGACY_REASONING_PREFIX:
+        legacy_allowed = provider_id == "deepseek" if allow_legacy is None else allow_legacy
+        if not legacy_allowed:
+            raise BridgeError(
+                "invalid_reasoning",
+                "Legacy DeepSeek reasoning cannot be replayed through another provider.",
+            )
+        key = _legacy_reasoning_key(secret)
+    else:
+        key = _reasoning_key(secret, provider_id)
     expected = hmac.new(key, b"tag\0" + nonce + ciphertext, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected):
         raise BridgeError("invalid_reasoning", "DeepSeek reasoning replay data failed validation.")
@@ -742,7 +861,7 @@ def _translate_tools(
                 continue
             raise BridgeError(
                 "unsupported_tool",
-                "Hosted web search is unavailable through the DeepSeek child-agent bridge.",
+                "Hosted web search is unavailable through the Chat Completions bridge.",
             )
         if tool.get("type") == "namespace":
             namespace = tool.get("name")
@@ -773,6 +892,8 @@ def _translate_messages(
     instructions: str | None,
     reasoning_secret: str | None,
     codex_home: Path | None,
+    provider_id: str = "deepseek",
+    replay_reasoning: bool = True,
 ) -> list[dict[str, Any]]:
     if isinstance(value, str):
         value = [{"type": "message", "role": "user", "content": value}]
@@ -821,6 +942,7 @@ def _translate_messages(
                 author=author,
                 recipient=recipient,
                 codex_home=codex_home,
+                provider_id=provider_id,
             )
             messages.append({
                 "role": "user",
@@ -831,7 +953,16 @@ def _translate_messages(
             last_was_tool_call = False
             continue
         if item_type == "reasoning":
-            opened = _open_reasoning(item.get("encrypted_content"), reasoning_secret)
+            if not replay_reasoning:
+                last_assistant_index = None
+                last_was_tool_call = False
+                continue
+            opened = _open_reasoning(
+                item.get("encrypted_content"),
+                reasoning_secret,
+                provider_id,
+                allow_legacy=replay_reasoning,
+            )
             if opened:
                 pending_reasoning += opened
             last_assistant_index = None
@@ -936,37 +1067,59 @@ def _effort(value: object) -> str:
 def build_chat_request(
     body: dict[str, Any],
     *,
+    provider: ProviderSpec | None = None,
+    allowed_models: set[str] | frozenset[str] | None = None,
     reasoning_secret: str | None = None,
     codex_home: Path | None = None,
 ) -> ChatRequest:
-    """Translate one Codex Responses request into a DeepSeek V4 chat request."""
+    """Translate one Codex Responses request for a selected chat provider."""
 
     if not isinstance(body, dict):
         raise BridgeError("invalid_request", "Responses request body must be an object.")
     model = body.get("model")
-    if model != REQUIRED_MODEL:
+    if not isinstance(model, str) or not model:
+        raise BridgeError("unsupported_model", "A routed provider model is required.")
+    if provider is None and model != REQUIRED_MODEL:
         raise BridgeError(
             "unsupported_model",
             f"This bridge is pinned to {REQUIRED_MODEL}.",
         )
+    if provider is not None and provider.protocol not in {
+        "chat-completions-compatible",
+        "deepseek-chat",
+    }:
+        raise BridgeError(
+            "unsupported_provider_protocol",
+            f"Provider {provider.id} does not use the chat bridge.",
+        )
+    if allowed_models is not None and model not in allowed_models:
+        raise BridgeError(
+            "unsupported_model",
+            "The requested model is not assigned to this provider route.",
+        )
+    provider_id = provider.id if provider is not None else "deepseek"
+    deepseek_mode = provider is None or provider.protocol == "deepseek-chat"
     registry = _ToolRegistry()
     tools = _translate_tools(body.get("tools"), registry)
     instructions = body.get("instructions")
     if instructions is not None and not isinstance(instructions, str):
         raise BridgeError("invalid_instructions", "Responses instructions must be text.")
     payload: dict[str, Any] = {
-        "model": REQUIRED_MODEL,
+        "model": model,
         "messages": _translate_messages(
             body.get("input", []),
             registry,
             instructions,
             reasoning_secret,
             codex_home,
+            provider_id,
+            deepseek_mode,
         ),
         "stream": True,
-        "thinking": {"type": "enabled"},
-        "reasoning_effort": _effort(body.get("reasoning")),
     }
+    if deepseek_mode:
+        payload["thinking"] = {"type": "enabled"}
+        payload["reasoning_effort"] = _effort(body.get("reasoning"))
     if tools:
         payload["tools"] = tools
     max_tokens = body.get("max_output_tokens")
@@ -976,16 +1129,20 @@ def build_chat_request(
 
 
 class ChatStreamTranslator:
-    """Stateful DeepSeek chat-chunk to Responses-event translator."""
+    """Stateful Chat Completions chunk-to-Responses event translator."""
 
     def __init__(
         self,
         tools: dict[str, ToolRoute],
         *,
         reasoning_secret: str | None = None,
+        provider_id: str = "deepseek",
+        preserve_reasoning: bool = True,
     ) -> None:
         self.tools = tools
         self.reasoning_secret = reasoning_secret
+        self.provider_id = provider_id
+        self.preserve_reasoning = preserve_reasoning
         self.response_id = ""
         self.message_id = f"msg_{uuid.uuid4().hex}"
         self.text_parts: list[str] = []
@@ -1077,7 +1234,7 @@ class ChatStreamTranslator:
                 "delta": content,
             })
         reasoning = delta.get("reasoning_content")
-        if isinstance(reasoning, str) and reasoning:
+        if self.preserve_reasoning and isinstance(reasoning, str) and reasoning:
             self.reasoning_parts.append(reasoning)
         tool_calls = delta.get("tool_calls")
         if isinstance(tool_calls, list):
@@ -1098,8 +1255,16 @@ class ChatStreamTranslator:
                 if isinstance(function, dict):
                     name = function.get("name")
                     arguments = function.get("arguments")
-                    if isinstance(name, str):
-                        state["name"] += name
+                    if isinstance(name, str) and name:
+                        current_name = state["name"]
+                        if not current_name:
+                            state["name"] = name
+                        elif name == current_name or current_name.endswith(name):
+                            pass
+                        elif name.startswith(current_name):
+                            state["name"] = name
+                        else:
+                            state["name"] += name
                     if isinstance(arguments, str):
                         state["arguments"] += arguments
         return events
@@ -1121,13 +1286,13 @@ class ChatStreamTranslator:
         except json.JSONDecodeError:
             raise BridgeError(
                 "invalid_tool_dispatch",
-                "DeepSeek returned malformed dispatcher arguments.",
+                "The upstream provider returned malformed dispatcher arguments.",
                 502,
             ) from None
         if not isinstance(wrapper, dict):
             raise BridgeError(
                 "invalid_tool_dispatch",
-                "DeepSeek returned a non-object dispatcher call.",
+                "The upstream provider returned a non-object dispatcher call.",
                 502,
             )
         selector = wrapper.get("tool")
@@ -1136,13 +1301,13 @@ class ChatStreamTranslator:
         if target is None:
             raise BridgeError(
                 "invalid_tool_dispatch",
-                "DeepSeek selected an unknown Codex tool.",
+                "The upstream provider selected an unknown Codex tool.",
                 502,
             )
         if "arguments" not in wrapper:
             raise BridgeError(
                 "invalid_tool_dispatch",
-                "DeepSeek omitted the selected Codex tool arguments.",
+                "The upstream provider omitted the selected Codex tool arguments.",
                 502,
             )
         selected_arguments = wrapper["arguments"]
@@ -1154,14 +1319,14 @@ class ChatStreamTranslator:
             except json.JSONDecodeError:
                 raise BridgeError(
                     "invalid_tool_dispatch",
-                    "DeepSeek returned malformed selected-tool arguments.",
+                    "The upstream provider returned malformed selected-tool arguments.",
                     502,
                 ) from None
             selected_arguments = parsed_arguments
         if not isinstance(selected_arguments, dict):
             raise BridgeError(
                 "invalid_tool_dispatch",
-                "DeepSeek returned non-object selected-tool arguments.",
+                "The upstream provider returned non-object selected-tool arguments.",
                 502,
             )
         return target, json.dumps(
@@ -1231,6 +1396,7 @@ class ChatStreamTranslator:
                         "encrypted_content": _seal_reasoning(
                             reasoning,
                             self.reasoning_secret,
+                            self.provider_id,
                         ),
                     },
                 }
@@ -1321,7 +1487,7 @@ def _read_upstream_events(response: Any) -> Any:
                 try:
                     event = json.loads(data.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    raise BridgeError("invalid_upstream_stream", "DeepSeek returned invalid SSE.", 502)
+                    raise BridgeError("invalid_upstream_stream", "The upstream provider returned invalid SSE.", 502)
                 if isinstance(event, dict):
                     yield event
             continue
@@ -1333,23 +1499,91 @@ def _read_upstream_events(response: Any) -> Any:
             try:
                 event = json.loads(data.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
-                raise BridgeError("invalid_upstream_stream", "DeepSeek returned invalid SSE.", 502)
+                raise BridgeError("invalid_upstream_stream", "The upstream provider returned invalid SSE.", 502)
             if isinstance(event, dict):
                 yield event
+
+
+def _legacy_deepseek_provider(upstream_url: str) -> ProviderSpec:
+    suffix = "/chat/completions"
+    base_url = upstream_url[: -len(suffix)] if upstream_url.endswith(suffix) else upstream_url
+    return ProviderSpec.from_dict(
+        {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "deepseek-chat",
+            "base_url": base_url.rstrip("/"),
+            "auth": "vault",
+            "capabilities": ["text", "tools"],
+            "context_window": 1_000_000,
+            "enabled": True,
+        }
+    )
 
 
 class _BridgeServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], upstream_url: str) -> None:
-        validated_upstream = _validate_upstream_url(upstream_url)
+    def __init__(
+        self,
+        address: tuple[str, int],
+        upstream_url: str = DEEPSEEK_CHAT_URL,
+        *,
+        catalog: Catalog | None = None,
+    ) -> None:
+        routes: dict[str, BridgeRoute] = {}
+        if catalog is None:
+            validated_upstream = _validate_upstream_url(upstream_url)
+            legacy_provider = _legacy_deepseek_provider(validated_upstream)
+            routes["deepseek"] = BridgeRoute(
+                provider=legacy_provider,
+                upstream_url=validated_upstream,
+                allowed_models=frozenset({REQUIRED_MODEL}),
+            )
+        else:
+            for provider in catalog.providers:
+                if not provider.enabled or provider.protocol not in {
+                    "chat-completions-compatible",
+                    "deepseek-chat",
+                }:
+                    continue
+                models = frozenset(
+                    agent.model
+                    for agent in catalog.agents
+                    if agent.provider == provider.id and agent.model is not None
+                )
+                routes[provider.id] = BridgeRoute(
+                    provider=provider,
+                    upstream_url=_chat_completions_url(provider),
+                    allowed_models=models,
+                )
+            if not routes:
+                raise BridgeError(
+                    "provider_unavailable",
+                    "The catalog contains no enabled chat providers.",
+                    500,
+                )
+            validated_upstream = next(iter(routes.values())).upstream_url
         super().__init__(address, _BridgeHandler)
         self.upstream_url = validated_upstream
+        self.routes = routes
+
+    def route_for_path(self, path: str) -> BridgeRoute | None:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.query or parsed.fragment:
+            return None
+        if parsed.path in {"/responses", "/v1/responses"}:
+            return self.routes.get("deepseek")
+        matched = re.fullmatch(
+            r"/(?:v1/)?providers/(?P<provider>[a-z0-9][a-z0-9_-]*)/responses",
+            parsed.path,
+        )
+        return self.routes.get(matched.group("provider")) if matched else None
 
 
 class _BridgeHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "CodexDeepSeekBridge/2"
+    server_version = "CodexMultiRelayBridge/3"
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -1385,23 +1619,27 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/_shutdown":
             expected = str(os.getpid())
-            if self.headers.get("X-Codex-DeepSeek-Bridge-Pid") != expected:
+            supplied = self.headers.get("X-Codex-Multi-Relay-Bridge-Pid") or self.headers.get(
+                "X-Codex-DeepSeek-Bridge-Pid"
+            )
+            if supplied != expected:
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "forbidden"})
                 return
             self._send_json(HTTPStatus.OK, {"status": "stopping"})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if self.path not in {"/responses", "/v1/responses"}:
+        route = self.server.route_for_path(self.path)  # type: ignore[attr-defined]
+        if route is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             return
         try:
-            self._handle_responses()
+            self._handle_responses(route)
         except BridgeError as error:
             self._send_error(error)
         except (BrokenPipeError, ConnectionResetError):
             return
 
-    def _handle_responses(self) -> None:
+    def _handle_responses(self, route: BridgeRoute) -> None:
         encoding = self.headers.get("Content-Encoding", "identity").casefold()
         if encoding not in {"", "identity"}:
             raise BridgeError("unsupported_encoding", "Compressed request bodies are unsupported.", 415)
@@ -1413,42 +1651,61 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if length < 1 or length > MAX_REQUEST_BYTES:
             raise BridgeError("invalid_length", "Responses request size is invalid.", 413)
         authorization = self.headers.get("Authorization", "")
-        if not authorization.startswith("Bearer sk-") or any(
-            character in authorization for character in "\r\n\0"
-        ):
-            raise BridgeError("authentication_failed", "A DeepSeek bearer credential is required.", 401)
+        if route.provider.auth == "vault":
+            valid_bearer = authorization.startswith("Bearer ") and len(authorization) > len("Bearer ")
+            if route.provider.protocol == "deepseek-chat":
+                valid_bearer = authorization.startswith("Bearer sk-")
+            if not valid_bearer or any(character in authorization for character in "\r\n\0"):
+                raise BridgeError(
+                    "authentication_failed",
+                    f"A bearer credential for provider {route.provider.id} is required.",
+                    401,
+                )
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise BridgeError("invalid_json", "Responses request JSON is invalid.") from None
-        secret = authorization[len("Bearer ") :]
-        translated = build_chat_request(body, reasoning_secret=secret)
+        secret = authorization[len("Bearer ") :] if authorization.startswith("Bearer ") else ""
+        translated = build_chat_request(
+            body,
+            provider=route.provider,
+            allowed_models=route.allowed_models,
+            reasoning_secret=secret or None,
+        )
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": "codex-multi-relay-chat-bridge/3",
+        }
+        if route.provider.auth == "vault":
+            headers["Authorization"] = authorization
         upstream = urllib.request.Request(
-            self.server.upstream_url,  # type: ignore[attr-defined]
+            route.upstream_url,
             data=_json_bytes(translated.payload),
-            headers={
-                "Authorization": authorization,
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-                "User-Agent": "codex-deepseek-responses-bridge/2",
-            },
+            headers=headers,
             method="POST",
         )
         try:
             # The server constructor has already restricted this URL to the
             # official HTTPS endpoint or an explicit loopback test fixture.
-            response = urllib.request.urlopen(upstream, timeout=600)  # nosec B310
+            response = _open_upstream(upstream, timeout=600)
         except urllib.error.HTTPError as exc:
             exc.read(MAX_UPSTREAM_ERROR_BYTES)
+            if 300 <= exc.code < 400:
+                raise BridgeError(
+                    "provider_redirect_blocked",
+                    f"Provider {route.provider.id} attempted an unsafe redirect.",
+                    502,
+                ) from None
             raise BridgeError(
                 "deepseek_http_error",
-                f"DeepSeek returned HTTP {exc.code}.",
+                f"Provider {route.provider.id} returned HTTP {exc.code}.",
                 exc.code,
             ) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise BridgeError(
                 "deepseek_unavailable",
-                "DeepSeek could not be reached by the local bridge.",
+                f"Provider {route.provider.id} could not be reached by the local bridge.",
                 502,
             ) from None
         with response:
@@ -1456,11 +1713,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             if "text/event-stream" not in content_type:
                 raw = response.read(MAX_REQUEST_BYTES + 1)
                 if len(raw) > MAX_REQUEST_BYTES:
-                    raise BridgeError("upstream_too_large", "DeepSeek response was too large.", 502)
+                    raise BridgeError("upstream_too_large", "The upstream provider response was too large.", 502)
                 try:
                     completion = json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    raise BridgeError("invalid_upstream_response", "DeepSeek returned invalid JSON.", 502)
+                    raise BridgeError("invalid_upstream_response", "The upstream provider returned invalid JSON.", 502)
                 chunks = [_completion_as_chunk(completion)]
             else:
                 chunks = _read_upstream_events(response)
@@ -1473,7 +1730,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             translator = ChatStreamTranslator(
                 translated.tools,
-                reasoning_secret=secret,
+                reasoning_secret=secret or None,
+                provider_id=route.provider.id,
+                preserve_reasoning=route.provider.protocol == "deepseek-chat",
             )
             self._write_events(translator.start())
             try:
@@ -1542,15 +1801,25 @@ def _health(timeout: float = 0.5) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def ensure_bridge(timeout: float = 5.0) -> None:
+def ensure_bridge(timeout: float = 5.0, *, codex_home: Path | None = None) -> None:
     """Start the loopback bridge on demand without exposing the API key."""
 
     current = _health()
     if current:
-        if current.get("service") != BRIDGE_SERVICE or current.get("version") != BRIDGE_VERSION:
+        service = current.get("service")
+        if service == BRIDGE_SERVICE and current.get("version") == BRIDGE_VERSION:
+            return
+        if service not in {BRIDGE_SERVICE, LEGACY_BRIDGE_SERVICE} or not _stop_bridge_health(current):
             raise BridgeError("bridge_port_conflict", f"Port {BRIDGE_PORT} is already in use.")
-        return
+        stop_deadline = time.monotonic() + min(timeout, 2.0)
+        while time.monotonic() < stop_deadline and _health() is not None:
+            time.sleep(0.05)
+        if _health() is not None:
+            raise BridgeError("bridge_port_conflict", f"Port {BRIDGE_PORT} is already in use.")
     command = [sys.executable, str(Path(__file__).resolve()), "--serve"]
+    catalog_path = _installed_catalog_path(codex_home)
+    if catalog_path is not None:
+        command.extend(["--catalog", str(catalog_path)])
     options: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -1580,19 +1849,24 @@ def ensure_bridge(timeout: float = 5.0) -> None:
     raise BridgeError("bridge_start_failed", "The local DeepSeek bridge did not become ready.", 500)
 
 
-def stop_bridge() -> bool:
-    current = _health()
-    if not current or current.get("service") != BRIDGE_SERVICE:
+def _stop_bridge_health(current: dict[str, Any]) -> bool:
+    service = current.get("service")
+    if service not in {BRIDGE_SERVICE, LEGACY_BRIDGE_SERVICE}:
         return False
     pid = current.get("pid")
     if not isinstance(pid, int):
         return False
+    header = (
+        "X-Codex-DeepSeek-Bridge-Pid"
+        if service == LEGACY_BRIDGE_SERVICE
+        else "X-Codex-Multi-Relay-Bridge-Pid"
+    )
     request = urllib.request.Request(
         f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/_shutdown",
         data=b"{}",
         headers={
             "Content-Type": "application/json",
-            "X-Codex-DeepSeek-Bridge-Pid": str(pid),
+            header: str(pid),
         },
         method="POST",
     )
@@ -1604,8 +1878,46 @@ def stop_bridge() -> bool:
         return False
 
 
-def serve(upstream_url: str = DEEPSEEK_CHAT_URL) -> None:
-    server = _BridgeServer((BRIDGE_HOST, BRIDGE_PORT), upstream_url)
+def stop_bridge() -> bool:
+    current = _health()
+    return _stop_bridge_health(current) if current else False
+
+
+def _installed_catalog_path(codex_home: Path | None = None) -> Path | None:
+    home = codex_home or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    for path in (
+        home / "codex-multi-relay" / "catalog.json",
+        home / "codex-deepseek-relay" / "catalog.json",
+    ):
+        if path.is_file():
+            return path
+    return None
+
+
+def _installed_catalog(codex_home: Path | None = None) -> Catalog | None:
+    path = _installed_catalog_path(codex_home)
+    if path is None:
+        return None
+    try:
+        return load_catalog(path)
+    except Exception as exc:
+        raise BridgeError(
+            "catalog_invalid",
+            "The installed provider catalog could not be loaded.",
+            500,
+        ) from exc
+
+
+def serve(
+    upstream_url: str = DEEPSEEK_CHAT_URL,
+    *,
+    catalog: Catalog | None = None,
+) -> None:
+    server = _BridgeServer(
+        (BRIDGE_HOST, BRIDGE_PORT),
+        upstream_url,
+        catalog=catalog or _installed_catalog(),
+    )
     try:
         server.serve_forever(poll_interval=0.2)
     finally:
@@ -1615,12 +1927,14 @@ def serve(upstream_url: str = DEEPSEEK_CHAT_URL) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--catalog")
     args = parser.parse_args(argv)
     if not args.serve:
         parser.error("--serve is required")
     try:
-        serve()
-    except OSError:
+        catalog = load_catalog(Path(args.catalog)) if args.catalog else None
+        serve(catalog=catalog)
+    except (OSError, BridgeError, ManagerError):
         return 2
     return 0
 

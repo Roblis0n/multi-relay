@@ -1,84 +1,97 @@
 **简体中文** | [English](./README_EN.md)
 
 <p align="center">
-  <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务经本机 Relay 原生扇出到 8 个 DeepSeek 子代理">
+  <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务按能力路由到多模型子代理，联网、视觉、音频和高风险任务保留在主代理">
 </p>
 
-<h1 align="center">Codex DeepSeek Relay</h1>
+<h1 align="center">Codex Multi Relay</h1>
 
-<p align="center">把 Codex 的原生子代理路由到 DeepSeek，并保留可审计的任务交接与执行轨迹。</p>
+<p align="center">为每个 Codex 子代理选择合适的 Provider 与模型，同时给主代理保留明确的能力边界。</p>
 
-本机回环适配层把 Codex Responses 转为 DeepSeek Chat Completions，让 `default`、`worker`、`explorer` 三个内置角色全部路由到经在线验证的 `deepseek-v4-pro`，默认允许 8 路并发（8-way fan-out）；主任务继续使用原来的 OpenAI 模型与最高思考强度。
+项目现在以无密钥的 `catalog.json` 管理 Provider 和 Agent。每个子代理可以独立设置协议、模型、能力、优先级、信任级别、沙箱、MCP 和 Skill。默认混合目录让 `default`、`worker`、`explorer` 使用经验证的 `deepseek-v4-pro`，让高信任 `reviewer` 使用原生 Codex；主任务继续使用用户原来的模型。
 
 ## 能得到什么
 
-- 两个及以上独立任务可像 fan-out subagents 一样并行派发；
-- 三个内置子角色全部使用 DeepSeek；
-- DeepSeek 思考强度从它的最高档 `max` 开始，按 `max → xhigh → high → medium → low → minimal` 实测；
-- 三个子角色都声明 DeepSeek V4 Pro 官方的 100 万 token 上下文，避免未知模型回退值过小；
-- 保持新版 `multi_agent_v2`，通过显式 `agent_type` 选择 DeepSeek 角色，不让子代理继承 Sol；
-- 本机回环适配层把 Codex Responses 转为 DeepSeek Chat Completions，支持命名空间工具、并行工具调用和思考模式续接；
-- 父代理在调用 DeepSeek 前显示完整的结构化任务交接，适配层按子线程目标精确匹配；宿主密文不会被误发给 DeepSeek；
-- 子线程界面显示基于真实工具调用生成的安全步骤摘要；模型原始私有思维链不会被伪造或直接暴露；
-- Key 只保存在 Windows Credential Manager 或 macOS Keychain；
-- 安装前隔离验证 Provider，安装后由真实 Codex 父模型执行完整原生验收，任何失败自动回滚；
-- 可随时 disable、enable 或完整 uninstall。
+- 支持 `codex-native`、`responses-compatible`、`chat-completions-compatible`、`deepseek-chat`；
+- 可用 CLI 添加或删除 Provider、创建任意命名的 Agent、替换模型并查询最终路由；
+- 根据 `text`、`tools`、`vision`、`audio`、`web` 与 `high-risk` 边界选择子代理；没有完整能力匹配时返回 `parent_required`；
+- 默认最多 8 路并发，只 fan-out 相互独立的工作项；
+- 保持 `multi_agent_v2`，通过显式 `agent_type` 和 `fork_turns="none"` 固定实际子代理；
+- Chat Completions 协议通过仅监听 `127.0.0.1:42137` 的本机 Relay 转换为 Responses；Responses 兼容端直接连接；
+- 每次派生前显示完整的 `[Relay task: <target>]` 交接，适配层按目标精确匹配，宿主密文不会被误发给外部 Provider；
+- vault 凭据只保存在 Windows Credential Manager 或 macOS Keychain，且按 Provider 隔离；
+- 所有目录和配置变更都解析、校验并事务写入，失败自动回滚；
+- disable 后仍可编辑目录，但不会隐式重新启用；只有 enable 恢复角色和路由规则。
 
 <p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%" alt="架构图：Codex 父任务经受保护的可见交接进入本地 Relay，再原生扇出到 default、worker、explorer 三个角色的 8 个 DeepSeek 子代理">
+  <img src="./assets/readme/architecture.svg" width="100%" alt="架构图：Codex 父任务经能力路由选择原生 Codex、Responses 或 Chat Completions 子代理">
 </p>
 
 <p align="center">
-  <img src="./assets/readme/workflow.svg" width="100%" alt="DeepSeek 子代理安装的验证与回滚流程：凭据写入、模型探测、事务式安装与原生验收，任何失败自动回滚">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="多模型目录的验证与回滚流程，以及视觉、音频、联网和高风险任务的主代理边界">
 </p>
 
 ## 快速开始
 
-要求：Windows 或 macOS、Python 3.11+、Codex 桌面运行时，以及有效的 DeepSeek API Key。
+要求：Windows 或 macOS、Python 3.11+、Codex 桌面运行时。只有使用 vault Provider 的目录才需要对应 API Key；纯原生目录不需要额外凭据。
 
 如果作为 Skill 安装：
 
 ```bash
-npx skills add Roblis0n/codex-deepseek-relay -g -y
+npx skills add Roblis0n/codex-multi-relay -g -y
 ```
 
-也可以直接在项目目录双击 `configure-relay.cmd`。它会自动寻找真正可运行的 Python，并明确显示 Key 的填写提示。
+也可以在项目目录双击 `configure-multi-relay.cmd`，安装默认混合目录。
 
 Windows 终端方式：
 
 ```powershell
-python scripts\relay.py setup
+python scripts\multi_relay.py setup --preset hybrid
 ```
 
 macOS：
 
 ```bash
-python3 scripts/relay.py setup
+python3 scripts/multi_relay.py setup --preset hybrid
 ```
 
-命令会在当前终端显示本地掩码输入框。Key 不要发到任何聊天窗口；输入后保存到系统凭据目标 `codex-deepseek-api-key`。
+只想使用 Codex 原生子代理时运行：
 
-只有模型实存、最高兼容思考强度、隔离 Provider 探测、正式单代理、三路并发、工具调用、续接和线程元数据全部通过，才返回 `ready`。完整子代理验收只运行一次，并使用实际 Codex 父模型；若失败，事务会恢复原配置。如果服务端暂时没有 `deepseek-v4-pro`，程序返回 `model_unavailable`，正式 Codex 配置不会改变。
+```bash
+python3 scripts/multi_relay.py setup --preset native
+```
+
+`native` 不读取凭据，也不联网。`hybrid` 会在当前终端显示本地掩码输入框；Key 不要发到聊天窗口。只有模型、兼容性和正式验收全部通过才返回 `ready`，否则事务恢复原配置。
 
 ## 安装结果
 
-管理器增加一个用户级 DeepSeek Provider。Codex 连接本机 `http://127.0.0.1:42137/v1`，适配层只监听回环地址，并把 Responses 转换为 DeepSeek Chat Completions。随后创建：
+管理器写入 `$CODEX_HOME/codex-multi-relay/catalog.json`，再按目录生成 Agent TOML。默认 `hybrid` 会创建：
 
 ```text
 $CODEX_HOME/agents/default.toml
 $CODEX_HOME/agents/worker.toml
 $CODEX_HOME/agents/explorer.toml
+$CODEX_HOME/agents/reviewer.toml
 ```
 
-同时在 `$CODEX_HOME/AGENTS.md` 写入可移除的 fan-out 规则，并保证：
+协议映射如下：
+
+| 协议 | 路径 | 认证 |
+| --- | --- | --- |
+| `codex-native` | Codex 原生 Provider | Codex 登录态 |
+| `responses-compatible` | 直连 Provider Responses API | vault 或无认证 |
+| `chat-completions-compatible` | 本机 Relay 转换 Chat Completions | vault 或无认证 |
+| `deepseek-chat` | 本机 Relay 的 DeepSeek 适配与思考续接 | vault |
+
+同时在 `$CODEX_HOME/AGENTS.md` 写入可移除的能力路由规则，并保证：
 
 - 顶层主模型、主 Provider、主思考强度不变；
 - 并发下限为 8，用户已有更高值时保留；
-- 每个子代理显式使用 `agent_type` 与 `fork_turns="none"`（或正数局部上下文），不会误继承主模型；
-- 每次 spawn、follow-up 或 send 前先输出与目标一一对应的 `[DeepSeek task: <target>]` 交接块；缺少交接时适配层严格拒绝；
+- 每个子代理显式使用 `agent_type` 与 `fork_turns="none"`（或正数局部上下文）；
+- 每次 spawn、follow-up 或 send 前先输出与目标一一对应的 `[Relay task: <target>]` 交接块；缺少交接时适配层严格拒绝；
 - 不替换正式模型目录；
 - 不关闭新版多代理；
-- 子代理失败时不静默换成 OpenAI 模型。
+- 不满足能力或信任边界时留在主代理，不静默换 Provider 或模型。
 
 ## 日常使用
 
@@ -88,30 +101,42 @@ $CODEX_HOME/agents/explorer.toml
 并行调查这四个互相独立的模块，最后给出综合结论。
 ```
 
-受管规则会在任务确实独立时 fan-out；共享状态、同一文件写入和顺序依赖任务仍由主代理串行处理。
+受管规则会先检查能力再 fan-out；共享状态、同一文件写入和顺序依赖任务仍由主代理串行处理。
 
-Codex 的 OpenAI 父模型会在本机看到 `spawn_agent` 之前就把任务正文变成受保护的 `gAAAA…` 内容，自定义 Provider 没有官方解密接口。受管规则因此会先把同一份完整任务以可见交接块写到父任务评论区，再调用原生子代理工具。适配层只接受目标和顺序均精确匹配的交接；找不到时返回错误，不让 DeepSeek 根据密文猜任务。
+Codex 会在本机工具层之前保护原生子代理消息，自定义 Provider 无法解开宿主密文。受管规则因此先把同一份完整任务以 `[Relay task]` 可见交接块写到父任务评论区，再调用原生子代理工具。适配层只接受目标和顺序均精确匹配的交接；找不到时返回错误，不让外部 Provider 根据密文猜任务。
 
-DeepSeek 的原始推理内容只用于同一子线程的工具续接，并以完整性保护密文保存。界面中的“思考/步骤”是适配层根据已实际发出的工具调用生成的安全摘要，例如“检查本地状态并运行验证”，不是模型私有思维链的逐字转录。
+`vision`、`audio` 和 `web` 默认留给主代理。子代理只有显式声明全部能力才有资格；web 代理还必须带真实 MCP server。`high-risk` 请求需要 `trust=high`，并始终由主代理最终验证。
 
 ## 管理命令
 
 以下以 Windows 为例；macOS 把 `python` 换成 `python3`，路径分隔符换成 `/`：
 
 ```powershell
-python scripts\relay.py status --json
-python scripts\relay.py setup --json
-python scripts\relay.py test --json
-python scripts\relay.py repair --json
-python scripts\relay.py disable --json
-python scripts\relay.py enable --json
-python scripts\relay.py uninstall --json
-python scripts\relay.py uninstall --remove-credential --json
+python scripts\multi_relay.py status --json
+python scripts\multi_relay.py setup --preset hybrid --json
+python scripts\multi_relay.py setup --preset native --json
+python scripts\multi_relay.py catalog --json
+python scripts\multi_relay.py apply --json
+python scripts\multi_relay.py provider list --json
+python scripts\multi_relay.py provider add --id vendor --name Vendor --protocol responses-compatible --base-url https://api.vendor.example/v1 --auth vault --capability text --capability tools --context-window 128000 --json
+python scripts\multi_relay.py provider remove vendor --json
+python scripts\multi_relay.py agent list --json
+python scripts\multi_relay.py agent set --name vendor-worker --description "Vendor worker" --provider vendor --model vendor-model --capability text --capability tools --instructions "Implement the assigned bounded task." --json
+python scripts\multi_relay.py agent remove vendor-worker --json
+python scripts\multi_relay.py route --capability text --capability tools --json
+python scripts\multi_relay.py test --json
+python scripts\multi_relay.py repair --json
+python scripts\multi_relay.py disable --json
+python scripts\multi_relay.py enable --json
+python scripts\multi_relay.py uninstall --json
+python scripts\multi_relay.py uninstall --remove-credential --json
 ```
 
 - 普通 uninstall 保留 Key。
 - 只有带 `--remove-credential` 的 uninstall 才删除系统凭据。
-- `repair` 等同于重新执行完整验证后的 setup。
+- `provider remove` 会拒绝删除仍被 Agent 引用的 Provider。
+- `repair` 保留当前目录；重复 setup 也不会把自定义目录重置为默认值。
+- disabled 状态下可以更新目录，但只有 `enable` 会重新生成角色和路由指令。
 - 自动发现 Codex 失败时，用 `CODEX_DESKTOP_BIN` 指定桌面运行时。
 
 ## 安全与回滚
@@ -119,10 +144,10 @@ python scripts\relay.py uninstall --remove-credential --json
 管理器使用进程锁、解析后写入、同目录原子替换和逐文件校验和。备份位于：
 
 ```text
-$CODEX_HOME/codex-deepseek-relay/backups/
+$CODEX_HOME/codex-multi-relay/backups/
 ```
 
-Key 不进入配置、命令参数、临时文件、备份、日志、异常或 Git。旧版本状态会在首次改动配置的管理操作中安全接管；旧单角色安装只在 manifest、受管标记和校验和共同证明所有权时自动迁移。
+Key 不进入配置、命令参数、临时文件、备份、日志、异常或 Git。旧 `$CODEX_HOME/codex-deepseek-relay` 和 `$CODEX_HOME/codex-deepseek-subagent` 状态只作为迁移来源；旧 manifest、受管 marker 与校验和无法证明所有权时返回 `conflict`，不会接管用户内容。
 
 更多细节见 [兼容性与安全边界](references/compatibility.md) 和 [Skill 执行规则](SKILL.md)。
 
@@ -137,7 +162,7 @@ python scripts/check_codex_bridge_runtime.py --codex-bin <path-to-codex>
 
 ## 品牌说明
 
-本项目是独立社区工具，与 OpenAI 或 DeepSeek 不存在隶属、合作或官方背书关系。ChatGPT、OpenAI、DeepSeek 及其标志归各自权利人所有。
+本项目是独立社区工具，与 OpenAI、DeepSeek 或其他 Provider 不存在隶属、合作或官方背书关系。相关名称与标志归各自权利人所有。
 
 ## License
 

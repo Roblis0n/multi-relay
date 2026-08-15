@@ -14,11 +14,11 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError, Paths, resolve_paths  # noqa: E402
-from deepseek_fanout.compatibility import CompatibilityReport  # noqa: E402
-from deepseek_fanout.instructions import INSTRUCTIONS_BEGIN  # noqa: E402
-from deepseek_fanout.manager import FanoutManager  # noqa: E402
-from deepseek_fanout.model_capabilities import ModelSelection  # noqa: E402
+from multi_relay import ManagerError, Paths, resolve_paths  # noqa: E402
+from multi_relay.compatibility import CompatibilityReport  # noqa: E402
+from multi_relay.instructions import INSTRUCTIONS_BEGIN  # noqa: E402
+from multi_relay.manager import RelayManager  # noqa: E402
+from multi_relay.model_capabilities import ModelSelection  # noqa: E402
 
 
 class FakeCredentialStore:
@@ -87,7 +87,7 @@ class ManagerTests(unittest.TestCase):
         events: list[str] | None = None,
         report: CompatibilityReport | None = None,
         live_report: CompatibilityReport | None = None,
-    ) -> FanoutManager:
+    ) -> RelayManager:
         credentials = store or FakeCredentialStore()
         timeline = events if events is not None else []
 
@@ -101,7 +101,16 @@ class ManagerTests(unittest.TestCase):
 
         def gate(codex_bin: str, gate_home: Path, selection: ModelSelection) -> CompatibilityReport:
             timeline.append("gate")
-            self.assertFalse((home / "agents" / "default.toml").exists())
+            existing_install = any(
+                (home / state / "manifest.json").exists()
+                for state in (
+                    "codex-multi-relay",
+                    "codex-deepseek-relay",
+                    "codex-deepseek-subagent",
+                )
+            )
+            if not existing_install:
+                self.assertFalse((home / "agents" / "default.toml").exists())
             return report or provider_smoke_report(selection)
 
         def live(codex_bin: str, live_home: Path, selection: ModelSelection) -> CompatibilityReport:
@@ -109,7 +118,7 @@ class ManagerTests(unittest.TestCase):
             self.assertTrue((home / "agents" / "default.toml").is_file())
             return live_report or passing_report(selection)
 
-        return FanoutManager(
+        return RelayManager(
             resolve_paths(str(home)),
             "codex.exe",
             credentials=credentials,
@@ -120,7 +129,7 @@ class ManagerTests(unittest.TestCase):
             bridge_stopper=lambda: timeline.append("bridge_stop") or True,
         )
 
-    def test_public_paths_never_include_a_live_model_catalog(self) -> None:
+    def test_public_paths_include_the_secret_free_multi_relay_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             paths = resolve_paths(directory)
@@ -128,11 +137,13 @@ class ManagerTests(unittest.TestCase):
         self.assertIsInstance(paths, Paths)
         self.assertEqual(paths.agents_dir, root / "agents")
         self.assertEqual(paths.instruction_file, root / "AGENTS.md")
-        self.assertEqual(paths.state_dir, root / "codex-deepseek-relay")
+        self.assertEqual(paths.state_dir, root / "codex-multi-relay")
         self.assertEqual(paths.manifest, paths.state_dir / "manifest.json")
+        self.assertEqual(paths.catalog, paths.state_dir / "catalog.json")
+        self.assertEqual(paths.relay_state_dir, root / "codex-deepseek-relay")
+        self.assertEqual(paths.relay_manifest, paths.relay_state_dir / "manifest.json")
         self.assertEqual(paths.legacy_state_dir, root / "codex-deepseek-subagent")
         self.assertEqual(paths.legacy_manifest, paths.legacy_state_dir / "manifest.json")
-        self.assertFalse(hasattr(paths, "catalog"))
 
     def test_current_install_in_legacy_state_is_read_and_adopted_on_disable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -162,12 +173,16 @@ class ManagerTests(unittest.TestCase):
             config.write_text('model = "gpt-5.6-sol"\n', encoding="utf-8")
             manager = self.make_manager(home)
             manager.setup()
-            manager.disable()
             paths = manager.paths
             paths.legacy_state_dir.mkdir(parents=True, exist_ok=True)
             legacy_manifest = paths.manifest.read_bytes()
             paths.manifest.replace(paths.legacy_manifest)
             config_before = config.read_bytes()
+            agents_before = {
+                path.name: path.read_bytes()
+                for path in (home / "agents").glob("*.toml")
+            }
+            instructions_before = (home / "AGENTS.md").read_bytes()
 
             failing_manager = self.make_manager(
                 home,
@@ -180,8 +195,14 @@ class ManagerTests(unittest.TestCase):
             self.assertFalse(paths.manifest.exists())
             self.assertEqual(paths.legacy_manifest.read_bytes(), legacy_manifest)
             self.assertEqual(config.read_bytes(), config_before)
-            self.assertEqual(list((home / "agents").glob("*.toml")), [])
-            self.assertFalse((home / "AGENTS.md").exists())
+            self.assertEqual(
+                {
+                    path.name: path.read_bytes()
+                    for path in (home / "agents").glob("*.toml")
+                },
+                agents_before,
+            )
+            self.assertEqual((home / "AGENTS.md").read_bytes(), instructions_before)
 
     def test_lifecycle_changes_refuse_schema3_state_until_setup_migrates_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -221,7 +242,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(parsed["agents"]["max_concurrent_threads_per_session"], 8)
             self.assertEqual(
                 {path.name for path in (home / "agents").glob("*.toml")},
-                {"default.toml", "worker.toml", "explorer.toml"},
+                {"default.toml", "worker.toml", "explorer.toml", "reviewer.toml"},
             )
             self.assertIn(
                 INSTRUCTIONS_BEGIN,
@@ -231,7 +252,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "ready")
             self.assertEqual(manager.status()["status"], "ready")
             manifest = json.loads(
-                (home / "codex-deepseek-relay" / "manifest.json").read_text(
+                (home / "codex-multi-relay" / "manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -308,7 +329,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(list((home / "agents").glob("*.toml")), [])
             self.assertFalse((home / "AGENTS.md").exists())
             self.assertFalse(
-                (home / "codex-deepseek-relay" / "manifest.json").exists()
+                (home / "codex-multi-relay" / "manifest.json").exists()
             )
 
     def test_conflicting_user_owned_role_is_not_overwritten(self) -> None:
@@ -362,7 +383,7 @@ class ManagerTests(unittest.TestCase):
             enabled = manager.enable()
             self.assertEqual(enabled["status"], "ready")
             self.assertEqual(events, setup_events)
-            self.assertEqual(len(list((home / "agents").glob("*.toml"))), 3)
+            self.assertEqual(len(list((home / "agents").glob("*.toml"))), 4)
 
             removed = manager.uninstall()
             self.assertEqual(removed["status"], "uninstalled")
@@ -370,7 +391,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(parsed["model"], "gpt-5.6-sol")
             self.assertIs(parsed["features"]["multi_agent"], False)
             self.assertNotIn("model_providers", parsed)
-            self.assertFalse((home / "codex-deepseek-relay" / "manifest.json").exists())
+            self.assertFalse((home / "codex-multi-relay" / "manifest.json").exists())
             self.assertEqual(store.remove_calls, 0)
             self.assertEqual(events[-1], "bridge_stop")
 
@@ -484,11 +505,11 @@ class ManagerTests(unittest.TestCase):
             self.assertFalse(legacy_agent.exists())
             self.assertEqual(
                 {path.name for path in (home / "agents").glob("*.toml")},
-                {"default.toml", "worker.toml", "explorer.toml"},
+                {"default.toml", "worker.toml", "explorer.toml", "reviewer.toml"},
             )
-            new_manifest_path = home / "codex-deepseek-relay" / "manifest.json"
+            new_manifest_path = home / "codex-multi-relay" / "manifest.json"
             new_manifest = json.loads(new_manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(new_manifest["schema_version"], 4)
+            self.assertEqual(new_manifest["schema_version"], 5)
             self.assertIs(new_manifest["legacy_migrated"], True)
             self.assertFalse((state / "manifest.json").exists())
 

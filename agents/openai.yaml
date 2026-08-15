@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex DeepSeek Relay"
-  short_description: "安全配置并验证 Codex 的 DeepSeek 多子代理"
-  default_prompt: "Use $codex-deepseek-relay to securely configure and verify DeepSeek fan-out for Codex."
+  display_name: "Codex Multi Relay"
+  short_description: "按能力安全路由 Codex 的多模型子代理"
+  default_prompt: "Use $codex-multi-relay to configure, route, and verify multi-provider child agents while preserving parent-only capability boundaries."

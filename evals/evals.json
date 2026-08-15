@@ -1,10 +1,10 @@
 {
-  "skill_name": "codex-deepseek-relay",
+  "skill_name": "codex-multi-relay",
   "evals": [
     {
       "id": 1,
-      "prompt": "帮我 setup Codex，让内置子代理默认使用 DeepSeek，并允许多代理并发。",
-      "expected_output": "先运行 status --json，再运行 setup --json。Key 由本机掩码输入框收集；在线确认 deepseek-v4-pro 和最高兼容思考强度后，配置 default、worker、explorer 与 8 路 fan-out，并保持主模型不变。",
+      "prompt": "帮我 setup Codex Multi Relay，使用混合预设并允许多代理并发。",
+      "expected_output": "先运行 status --json，再运行 setup --preset hybrid --json。Key 由本机掩码输入框收集；在线确认 deepseek-v4-pro 后配置 DeepSeek default、worker、explorer 与原生 reviewer，允许最多 8 路 fan-out，并保持主模型不变。",
       "files": []
     },
     {
@@ -21,8 +21,8 @@
     },
     {
       "id": 4,
-      "prompt": "同时调查四个彼此独立的模块，给我综合结论。",
-      "expected_output": "适用 fan-out：每个独立工作项分配一个子代理，最多 8 个；读重任务优先 explorer，全部完成后由主代理验证并综合。",
+      "prompt": "同时调查四个彼此独立的模块，给我综合结论；其中一个需要联网。",
+      "expected_output": "先按 capability routing 判断边界：本地读重任务可交给 explorer；若目录中没有声明 web 能力且配置真实 MCP 的子代理，联网项保留给主代理。最多 8 个并发子代理，全部完成后由主代理验证并综合。",
       "files": []
     },
     {
@@ -39,8 +39,8 @@
     },
     {
       "id": 7,
-      "prompt": "先 disable DeepSeek fan-out，之后再 enable，别重新联网验证。",
-      "expected_output": "disable 移除三个受管角色与 fan-out 指令并保留 Provider/凭据；enable 使用上次已验证选择恢复，不重新查询模型。",
+      "prompt": "先 disable Multi Relay，之后再 enable，别重新联网验证。",
+      "expected_output": "disable 移除受管角色与路由指令并保留 catalog、Provider 和凭据；enable 使用已验证目录恢复，不重新查询模型。",
       "files": []
     },
     {

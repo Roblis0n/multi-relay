@@ -20,16 +20,16 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = ROOT / "scripts"
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import bridge as bridge_module  # noqa: E402
-from deepseek_fanout.bridge import _BridgeServer  # noqa: E402
-from deepseek_fanout.model_capabilities import ModelSelection  # noqa: E402
-from deepseek_fanout.native_test import run_native_acceptance, verify_native_evidence  # noqa: E402
-from deepseek_fanout.paths import resolve_paths  # noqa: E402
-from deepseek_fanout.roles import expected_agent_files  # noqa: E402
+from multi_relay import bridge as bridge_module  # noqa: E402
+from multi_relay.bridge import _BridgeServer  # noqa: E402
+from multi_relay.model_capabilities import ModelSelection  # noqa: E402
+from multi_relay.native_test import run_native_acceptance, verify_native_evidence  # noqa: E402
+from multi_relay.paths import resolve_paths  # noqa: E402
+from multi_relay.roles import expected_agent_files  # noqa: E402
 
 
 TOKEN = "CODEX_BRIDGE_RUNTIME_OK"
-FANOUT_TOKEN = "CODEX_DEEPSEEK_FANOUT_OK"
+FANOUT_TOKEN = "CODEX_MULTI_RELAY_FANOUT_OK"
 ACCEPTANCE_TOKEN = "CODEX_NATIVE_ACCEPTANCE_OK"
 CHILD_TOKENS = {
     "default": "DEEPSEEK_FIXTURE_DEFAULT_OK",

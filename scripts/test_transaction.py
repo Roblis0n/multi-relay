@@ -12,8 +12,8 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout.transaction import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay.transaction import (  # noqa: E402
     InstallPlan,
     atomic_write,
     execute_install_plan,

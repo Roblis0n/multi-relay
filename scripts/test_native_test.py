@@ -16,9 +16,9 @@ from types import SimpleNamespace
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError, resolve_paths  # noqa: E402
-from deepseek_fanout.model_capabilities import ModelSelection  # noqa: E402
-from deepseek_fanout.native_test import (  # noqa: E402
+from multi_relay import ManagerError, resolve_paths  # noqa: E402
+from multi_relay.model_capabilities import ModelSelection  # noqa: E402
+from multi_relay.native_test import (  # noqa: E402
     NativeEvidence,
     _prompt,
     run_native_acceptance,

@@ -1,0 +1,1115 @@
+"""Transactional lifecycle management for Codex Multi Relay."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import tempfile
+import tomllib
+from collections.abc import Callable
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .bridge import BRIDGE_BASE_URL, stop_bridge
+from .catalog import (
+    AgentSpec,
+    Catalog,
+    ProviderSpec,
+    default_catalog,
+    load_catalog,
+    route_agent,
+    save_catalog_bytes,
+)
+from .compatibility import CompatibilityReport, probe_efforts, run_isolated_gate
+from .credentials import CredentialStore, credential_store, provider_auth_command
+from .errors import ManagerError
+from .instructions import (
+    INSTRUCTIONS_BEGIN,
+    INSTRUCTIONS_END,
+    LEGACY_INSTRUCTION_MARKERS,
+    apply_fanout_instructions,
+    remove_fanout_instructions,
+)
+from .migration import LegacyMigration, catalog_from_schema4, plan_legacy_migration
+from .model_capabilities import ModelSelection
+from .native_test import native_acceptance_report
+from .paths import Paths
+from .provider_api import discover_model
+from .roles import expected_agent_files
+from .toml_config import (
+    LEGACY_PROVIDER_MARKERS,
+    PROVIDER_BEGIN,
+    PROVIDER_END,
+    apply_codex_config,
+    capture_managed_values,
+    remove_codex_config,
+)
+from .transaction import (
+    InstallPlan,
+    atomic_write,
+    execute_install_plan,
+    operation_lock,
+    rollback_transaction,
+)
+
+
+SCHEMA_VERSION = 5
+DEFAULT_CONCURRENCY = 8
+_FULL_ACCEPTANCE_CHECKS = {
+    "provider_initialized",
+    "single_child_passed",
+    "fanout_passed",
+    "tools_passed",
+    "resume_passed",
+    "child_metadata_passed",
+    "parent_unchanged",
+}
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise ManagerError("invalid_manifest", "The Multi Relay manifest is invalid.") from None
+    if not isinstance(payload, dict):
+        raise ManagerError("invalid_manifest", "The Multi Relay manifest is invalid.")
+    return payload
+
+
+def _selection_from_manifest(manifest: dict[str, Any]) -> ModelSelection:
+    selection = manifest.get("selection")
+    if not isinstance(selection, dict):
+        raise ManagerError("invalid_manifest", "The manifest has no validated model selection.")
+    required = ("requested_model", "resolved_model", "effort_source")
+    if not all(isinstance(selection.get(key), str) for key in required):
+        raise ManagerError("invalid_manifest", "The validated model selection is incomplete.")
+    effort = selection.get("reasoning_effort")
+    if effort is not None and not isinstance(effort, str):
+        raise ManagerError("invalid_manifest", "The validated reasoning effort is invalid.")
+    return ModelSelection(
+        requested_model=selection["requested_model"],
+        resolved_model=selection["resolved_model"],
+        reasoning_effort=effort,
+        effort_source=selection["effort_source"],
+    )
+
+
+def _has_original_values(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("features"), dict)
+        and isinstance(value.get("agents"), dict)
+        and isinstance(value.get("features.multi_agent_v2"), dict)
+    )
+
+
+class RelayManager:
+    """Own the installed catalog, generated agents, routing policy, and lifecycle."""
+
+    def __init__(
+        self,
+        paths: Paths,
+        codex_bin: str,
+        *,
+        credentials: CredentialStore | None = None,
+        credential_factory: Callable[[ProviderSpec], CredentialStore] | None = None,
+        model_discoverer: Callable[..., str] = discover_model,
+        selection_resolver: Callable[[str], ModelSelection] | None = None,
+        compatibility_gate: Callable[
+            [str, Path, ModelSelection], CompatibilityReport
+        ] = run_isolated_gate,
+        live_acceptance: Callable[
+            [str, Path, ModelSelection], CompatibilityReport
+        ] = native_acceptance_report,
+        bridge_stopper: Callable[[], bool] = stop_bridge,
+    ) -> None:
+        self.paths = paths
+        self.codex_bin = codex_bin
+        self.credentials = credentials or credential_store()
+        self._credential_factory = credential_factory or (
+            lambda provider: credential_store(
+                provider_id=provider.id,
+                protocol=provider.protocol,
+            )
+        )
+        self._model_discoverer = model_discoverer
+        self._selection_resolver = selection_resolver
+        self._compatibility_gate = compatibility_gate
+        self._live_acceptance = live_acceptance
+        self._bridge_stopper = bridge_stopper
+
+    @property
+    def _lock_path(self) -> Path:
+        return self.paths.state_dir / "manager.lock"
+
+    def _backup_dir(self, operation: str) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-%fZ")
+        return self.paths.state_dir / "backups" / f"{stamp}-{operation}"
+
+    def _read_manifest(self) -> tuple[dict[str, Any], Path]:
+        for path in (
+            self.paths.manifest,
+            self.paths.relay_manifest,
+            self.paths.legacy_manifest,
+        ):
+            if path.exists():
+                return _read_json(path), path
+        return {}, self.paths.manifest
+
+    def _catalog_source(self, manifest_source: Path) -> Path:
+        if manifest_source == self.paths.manifest:
+            return self.paths.catalog
+        return manifest_source.parent / "catalog.json"
+
+    def _adoption_removals(self, manifest_source: Path) -> tuple[Path, ...]:
+        if manifest_source == self.paths.manifest:
+            return ()
+        removals = [manifest_source]
+        old_catalog = self._catalog_source(manifest_source)
+        if old_catalog.exists() and old_catalog != self.paths.catalog:
+            removals.append(old_catalog)
+        return tuple(removals)
+
+    @staticmethod
+    def _require_current_schema(manifest: dict[str, Any]) -> None:
+        schema = manifest.get("schema_version")
+        if schema == SCHEMA_VERSION:
+            return
+        if isinstance(schema, int) and not isinstance(schema, bool) and schema > SCHEMA_VERSION:
+            raise ManagerError(
+                "unsupported_manifest_schema",
+                "This installation was created by a newer Multi Relay version.",
+                {"schema_version": schema},
+            )
+        raise ManagerError(
+            "legacy_requires_setup",
+            "Run setup or repair to migrate this earlier Relay installation first.",
+        )
+
+    @staticmethod
+    def _reject_future_schema(manifest: dict[str, Any]) -> None:
+        schema = manifest.get("schema_version")
+        if isinstance(schema, int) and not isinstance(schema, bool) and schema > SCHEMA_VERSION:
+            raise ManagerError(
+                "unsupported_manifest_schema",
+                "This installation was created by a newer Multi Relay version.",
+                {"schema_version": schema},
+            )
+
+    def _relative(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self.paths.home).as_posix()
+        except ValueError:
+            raise ManagerError("unsafe_target", "A managed path escaped Codex Home.") from None
+
+    def _default_selection(self, model: str) -> ModelSelection:
+        with tempfile.TemporaryDirectory(prefix="codex-multi-relay-effort-") as directory:
+            home = Path(directory).resolve()
+            (home / "config.toml").write_text(
+                apply_codex_config("", provider_auth_command()),
+                encoding="utf-8",
+                newline="\n",
+            )
+            return probe_efforts(self.codex_bin, home, model)
+
+    def _resolve_selection(self, model: str) -> ModelSelection:
+        resolver = self._selection_resolver or self._default_selection
+        selection = resolver(model)
+        if selection.resolved_model != model:
+            raise ManagerError(
+                "model_selection_mismatch",
+                "The reasoning probe returned a different provider model.",
+            )
+        return selection
+
+    @staticmethod
+    def _require_report(
+        report: CompatibilityReport,
+        stage: str,
+        *,
+        require_full: bool = False,
+    ) -> None:
+        checks = report.as_checks()
+        failed = [name for name, passed in checks.items() if not passed]
+        if require_full:
+            failed.extend(sorted(_FULL_ACCEPTANCE_CHECKS.difference(checks)))
+        if failed:
+            raise ManagerError(
+                "compatibility_failed",
+                f"Multi Relay failed the {stage} compatibility checks.",
+                {"failed_checks": sorted(set(failed))},
+            )
+
+    def _assert_instruction_markers(self, text: str) -> None:
+        for begin, end in ((INSTRUCTIONS_BEGIN, INSTRUCTIONS_END), *LEGACY_INSTRUCTION_MARKERS):
+            if (begin in text) != (end in text):
+                raise ManagerError(
+                    "conflict",
+                    "AGENTS.md contains an incomplete managed Relay block.",
+                    {"path": str(self.paths.instruction_file)},
+                )
+
+    def _assert_no_unowned_managed_blocks(
+        self,
+        config: str,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Refuse lookalike managed blocks when no manifest proves ownership."""
+
+        if manifest:
+            return
+        instructions = (
+            self.paths.instruction_file.read_text(encoding="utf-8")
+            if self.paths.instruction_file.is_file()
+            else ""
+        )
+        provider_markers = ((PROVIDER_BEGIN, PROVIDER_END), *LEGACY_PROVIDER_MARKERS)
+        instruction_markers = (
+            (INSTRUCTIONS_BEGIN, INSTRUCTIONS_END),
+            *LEGACY_INSTRUCTION_MARKERS,
+        )
+        if any(marker in config for pair in provider_markers for marker in pair) or any(
+            marker in instructions for pair in instruction_markers for marker in pair
+        ):
+            raise ManagerError(
+                "conflict",
+                "Managed Relay markers exist without a manifest proving ownership.",
+            )
+
+    def _managed_agent_entries(self, manifest: dict[str, Any]) -> dict[Path, str]:
+        managed = manifest.get("managed_files")
+        if not isinstance(managed, dict):
+            return {}
+        result: dict[Path, str] = {}
+        agents_root = self.paths.agents_dir.resolve()
+        for relative, digest in managed.items():
+            if not isinstance(relative, str) or not isinstance(digest, str):
+                raise ManagerError("invalid_manifest", "Managed file ownership is invalid.")
+            path = (self.paths.home / relative).resolve()
+            try:
+                path.relative_to(self.paths.home)
+                inside = path.parent == agents_root and path.suffix.casefold() == ".toml"
+            except ValueError:
+                inside = False
+            if inside:
+                result[path] = digest
+        return result
+
+    def _assert_role_ownership(
+        self,
+        desired: dict[Path, bytes],
+        manifest: dict[str, Any],
+    ) -> None:
+        managed = self._managed_agent_entries(manifest)
+        conflicts: list[str] = []
+        for raw_path, content in desired.items():
+            path = raw_path.resolve()
+            if not path.exists():
+                continue
+            if not path.is_file():
+                conflicts.append(str(path))
+                continue
+            current = path.read_bytes()
+            if current == content:
+                continue
+            previous_hash = managed.get(path)
+            if previous_hash is None or _sha256(current) != previous_hash:
+                conflicts.append(str(path))
+        if conflicts:
+            raise ManagerError(
+                "conflict",
+                "Existing user-owned Codex agent files differ from the managed catalog.",
+                {"paths": conflicts},
+            )
+
+    def _agent_removals(
+        self,
+        manifest: dict[str, Any],
+        *,
+        keep: set[Path] | None = None,
+    ) -> tuple[Path, ...]:
+        keep_resolved = {path.resolve() for path in (keep or set())}
+        removals: list[Path] = []
+        conflicts: list[str] = []
+        for path, digest in self._managed_agent_entries(manifest).items():
+            if path in keep_resolved or not path.exists():
+                continue
+            if not path.is_file() or _sha256(path.read_bytes()) != digest:
+                conflicts.append(str(path))
+            else:
+                removals.append(path)
+        if conflicts:
+            raise ManagerError(
+                "conflict",
+                "A managed agent changed after setup and was not removed.",
+                {"paths": conflicts},
+            )
+        return tuple(removals)
+
+    def _require_catalog_owned(self, manifest: dict[str, Any], catalog_path: Path) -> None:
+        expected = manifest.get("catalog_sha256")
+        if not isinstance(expected, str):
+            managed = manifest.get("managed_files")
+            if isinstance(managed, dict):
+                expected = managed.get(self._relative(catalog_path))
+        if (
+            not catalog_path.is_file()
+            or not isinstance(expected, str)
+            or _sha256(catalog_path.read_bytes()) != expected
+        ):
+            raise ManagerError(
+                "conflict",
+                "The managed catalog changed outside an explicit apply operation.",
+                {"path": str(catalog_path)},
+            )
+
+    def _credential_for(self, provider: ProviderSpec) -> CredentialStore:
+        if provider.id == "deepseek":
+            return self.credentials
+        return self._credential_factory(provider)
+
+    def credential_for_provider(self, provider: ProviderSpec) -> CredentialStore:
+        """Expose the scoped vault selected for an already validated provider."""
+
+        return self._credential_for(provider)
+
+    def _auth_factory(self, catalog: Catalog) -> Callable[[str, bool], list[str]]:
+        def command(provider_id: str, start_bridge: bool) -> list[str]:
+            provider = catalog.provider(provider_id)
+            return provider_auth_command(
+                provider.id,
+                self.paths.home,
+                start_bridge,
+                protocol=provider.protocol,
+            )
+
+        return command
+
+    def _discover_builtin_selection(
+        self,
+        catalog: Catalog,
+    ) -> tuple[Catalog, ModelSelection | None, CompatibilityReport | None]:
+        providers = [
+            item
+            for item in catalog.providers
+            if item.enabled and item.id == "deepseek" and item.protocol == "deepseek-chat"
+        ]
+        if not providers:
+            return catalog, None, None
+        provider = providers[0]
+        secret = self._credential_for(provider).read()
+        if not secret:
+            raise ManagerError(
+                "credential_missing",
+                "No DeepSeek API Key is stored in the operating-system credential vault.",
+                {"provider": provider.id},
+            )
+        requested_models = {
+            item.model for item in catalog.agents if item.provider == provider.id and item.model
+        }
+        if len(requested_models) != 1:
+            raise ManagerError(
+                "invalid_model",
+                "The built-in DeepSeek preset must use one validated model.",
+            )
+        requested = next(iter(requested_models))
+        if self._model_discoverer is discover_model:
+            model = discover_model(secret, requested, provider=provider)
+        else:
+            model = self._model_discoverer(secret)
+        selection = self._resolve_selection(model)
+        payload = catalog.to_dict()
+        for agent in payload["agents"]:
+            if isinstance(agent, dict) and agent.get("provider") == provider.id:
+                agent["model"] = selection.resolved_model
+                agent["reasoning_effort"] = selection.reasoning_effort
+        selected_catalog = Catalog.from_dict(payload)
+        gate = self._compatibility_gate(self.codex_bin, self.paths.home, selection)
+        self._require_report(gate, "isolated pre-install")
+        return selected_catalog, selection, gate
+
+    def _manifest_payload(
+        self,
+        catalog: Catalog,
+        catalog_bytes: bytes,
+        desired_roles: dict[Path, bytes],
+        original_values: dict[str, Any],
+        compatibility: dict[str, bool],
+        *,
+        previous: dict[str, Any],
+        selection: ModelSelection | None,
+        instruction_file_preexisted: bool,
+        config_preexisted: bool,
+        status: str = "enabled",
+        legacy_migrated: bool = False,
+    ) -> dict[str, Any]:
+        managed = {
+            self._relative(path): _sha256(content)
+            for path, content in desired_roles.items()
+        }
+        managed[self._relative(self.paths.catalog)] = _sha256(catalog_bytes)
+        payload: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "catalog_schema_version": catalog.schema_version,
+            "status": status,
+            "installed_at": previous.get("installed_at")
+            if isinstance(previous.get("installed_at"), str)
+            else datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "concurrency": catalog.concurrency,
+            "providers": [item.id for item in catalog.providers],
+            "agents": [item.name for item in catalog.agents],
+            "catalog_sha256": _sha256(catalog_bytes),
+            "original_values": original_values,
+            "instruction_file_preexisted": instruction_file_preexisted,
+            "config_preexisted": config_preexisted,
+            "managed_files": managed,
+            "preinstall_compatibility": compatibility,
+            "compatibility": compatibility,
+            "legacy_migrated": legacy_migrated,
+        }
+        if selection is not None:
+            payload["selection"] = asdict(selection)
+        return payload
+
+    def _install_catalog_locked(
+        self,
+        catalog: Catalog,
+        *,
+        operation: str,
+        original_config: str,
+        working_config: str,
+        previous_manifest: dict[str, Any],
+        manifest_source: Path,
+        migration: LegacyMigration | None = None,
+        selection: ModelSelection | None = None,
+        gate: CompatibilityReport | None = None,
+        run_live: bool = False,
+    ) -> dict[str, Any]:
+        installation_status = (
+            "disabled" if previous_manifest.get("status") == "disabled" else "enabled"
+        )
+        enabled = installation_status == "enabled"
+        desired_roles = expected_agent_files(self.paths.agents_dir, catalog)
+        self._assert_role_ownership(desired_roles, previous_manifest)
+        original_instructions = (
+            self.paths.instruction_file.read_text(encoding="utf-8")
+            if self.paths.instruction_file.is_file()
+            else ""
+        )
+        self._assert_instruction_markers(original_instructions)
+        candidate_instructions = (
+            apply_fanout_instructions(
+                original_instructions,
+                catalog.concurrency,
+                catalog=catalog,
+            )
+            if enabled
+            else remove_fanout_instructions(original_instructions)
+        )
+        try:
+            candidate_config = apply_codex_config(
+                working_config,
+                catalog,
+                auth_command_factory=self._auth_factory(catalog),
+            )
+        except ManagerError as exc:
+            if exc.code == "invalid_config" and "model_providers" in original_config:
+                raise ManagerError(
+                    "conflict",
+                    "An unmanaged provider conflicts with a managed provider identifier.",
+                ) from None
+            raise
+
+        stored_values = previous_manifest.get("original_values")
+        original_values = (
+            stored_values
+            if _has_original_values(stored_values)
+            else capture_managed_values(working_config)
+        )
+        instruction_preexisted = bool(
+            previous_manifest.get(
+                "instruction_file_preexisted",
+                self.paths.instruction_file.is_file(),
+            )
+        )
+        config_preexisted = bool(
+            previous_manifest.get("config_preexisted", self.paths.config.is_file())
+        )
+        compatibility = gate.as_checks() if gate is not None else {"catalog_valid": True}
+        catalog_bytes = save_catalog_bytes(catalog)
+        manifest = self._manifest_payload(
+            catalog,
+            catalog_bytes,
+            desired_roles,
+            original_values,
+            compatibility,
+            previous=previous_manifest,
+            selection=selection,
+            instruction_file_preexisted=instruction_preexisted,
+            config_preexisted=config_preexisted,
+            status=installation_status,
+            legacy_migrated=bool(
+                migration or previous_manifest.get("legacy_migrated", False)
+            ),
+        )
+        files = {
+            self.paths.config: candidate_config.encode("utf-8"),
+            self.paths.catalog: catalog_bytes,
+            **(migration.files if migration else {}),
+        }
+        removals = list(migration.removals if migration else ())
+        if enabled:
+            files[self.paths.instruction_file] = candidate_instructions.encode("utf-8")
+            files.update(desired_roles)
+            removals.extend(
+                self._agent_removals(previous_manifest, keep=set(desired_roles))
+            )
+        else:
+            removals.extend(self._agent_removals(previous_manifest))
+            if candidate_instructions or instruction_preexisted:
+                files[self.paths.instruction_file] = candidate_instructions.encode("utf-8")
+            elif self.paths.instruction_file.exists():
+                removals.append(self.paths.instruction_file)
+        removals.extend(self._adoption_removals(manifest_source))
+        transaction = execute_install_plan(
+            InstallPlan(
+                files=files,
+                removals=tuple(dict.fromkeys(removals)),
+                manifest=manifest,
+                backup_dir=self._backup_dir(operation),
+            ),
+            self.paths.manifest,
+        )
+        if enabled and run_live and selection is not None:
+            try:
+                live = self._live_acceptance(self.codex_bin, self.paths.home, selection)
+                self._require_report(live, "post-install native", require_full=True)
+                installed = _read_json(self.paths.manifest)
+                installed["preinstall_compatibility"] = compatibility
+                installed["compatibility"] = live.as_checks()
+                atomic_write(
+                    self.paths.manifest,
+                    (json.dumps(installed, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                    0o600,
+                )
+            except Exception:
+                rollback_transaction(transaction)
+                raise
+        return {
+            "status": "ready" if enabled else "disabled",
+            "providers": [item.id for item in catalog.providers],
+            "agents": [item.name for item in catalog.agents],
+            "max_concurrent_children": catalog.concurrency,
+            "backup": str(transaction.backup_dir),
+            **(
+                {
+                    "model": selection.resolved_model,
+                    "reasoning_effort": selection.reasoning_effort,
+                }
+                if selection is not None
+                else {}
+            ),
+        }
+
+    def setup(self, preset: str = "hybrid") -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            if not self.paths.config.is_file():
+                raise ManagerError("config_missing", "Codex config.toml was not found.")
+            original_config = self.paths.config.read_text(encoding="utf-8")
+            previous, source = self._read_manifest()
+            self._reject_future_schema(previous)
+            self._assert_no_unowned_managed_blocks(original_config, previous)
+            migration: LegacyMigration | None = None
+            working_config = original_config
+            schema = previous.get("schema_version")
+            if schema == SCHEMA_VERSION:
+                catalog = self._active_catalog(previous, source, require_owned=True)
+            elif schema == 4:
+                catalog = catalog_from_schema4(previous)
+            else:
+                if previous and schema not in {SCHEMA_VERSION, 4}:
+                    migration = plan_legacy_migration(
+                        self.paths,
+                        original_config,
+                        previous,
+                        state_root=source.parent,
+                    )
+                    working_config = migration.config_text
+                catalog = default_catalog(preset)
+            # Ownership conflicts are local and deterministic; reject them before
+            # any provider discovery or compatibility process is started.
+            self._assert_role_ownership(
+                expected_agent_files(self.paths.agents_dir, catalog),
+                previous,
+            )
+            if previous.get("status") == "disabled":
+                selection = self._preserved_selection(previous, catalog)
+                gate = None
+            else:
+                catalog, selection, gate = self._discover_builtin_selection(catalog)
+            return self._install_catalog_locked(
+                catalog,
+                operation="setup",
+                original_config=original_config,
+                working_config=working_config,
+                previous_manifest=previous,
+                manifest_source=source,
+                migration=migration,
+                selection=selection,
+                gate=gate,
+                run_live=selection is not None,
+            )
+
+    def _active_catalog(
+        self,
+        manifest: dict[str, Any],
+        manifest_source: Path,
+        *,
+        require_owned: bool,
+    ) -> Catalog:
+        self._require_current_schema(manifest)
+        source = self._catalog_source(manifest_source)
+        if not source.is_file() and manifest_source != self.paths.manifest:
+            source = self.paths.catalog
+        if require_owned:
+            self._require_catalog_owned(manifest, source)
+        return load_catalog(source)
+
+    def _preserved_selection(
+        self,
+        manifest: dict[str, Any],
+        catalog: Catalog,
+    ) -> ModelSelection | None:
+        try:
+            selection = _selection_from_manifest(manifest)
+        except ManagerError:
+            return None
+        if any(
+            item.provider == "deepseek" and item.model == selection.resolved_model
+            for item in catalog.agents
+        ):
+            return selection
+        return None
+
+    def _apply_catalog_locked(
+        self,
+        catalog: Catalog,
+        manifest: dict[str, Any],
+        source: Path,
+        *,
+        operation: str,
+    ) -> dict[str, Any]:
+        if not self.paths.config.is_file():
+            raise ManagerError("config_missing", "Codex config.toml was not found.")
+        config = self.paths.config.read_text(encoding="utf-8")
+        return self._install_catalog_locked(
+            catalog,
+            operation=operation,
+            original_config=config,
+            working_config=config,
+            previous_manifest=manifest,
+            manifest_source=source,
+            selection=self._preserved_selection(manifest, catalog),
+        )
+
+    def repair(self) -> dict[str, Any]:
+        manifest, _ = self._read_manifest()
+        if not manifest or manifest.get("schema_version") != SCHEMA_VERSION:
+            return self.setup()
+        return self.apply()
+
+    def apply(self, catalog: Catalog | None = None) -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            manifest, source = self._read_manifest()
+            if not manifest:
+                raise ManagerError("not_configured", "Multi Relay is not installed.")
+            selected = catalog or self._active_catalog(manifest, source, require_owned=False)
+            return self._apply_catalog_locked(selected, manifest, source, operation="apply")
+
+    def catalog(self) -> dict[str, object]:
+        manifest, source = self._read_manifest()
+        if not manifest:
+            raise ManagerError("not_configured", "Multi Relay is not installed.")
+        return self._active_catalog(manifest, source, require_owned=False).to_dict()
+
+    def list_providers(self) -> list[dict[str, object]]:
+        return list(self.catalog()["providers"])  # type: ignore[arg-type]
+
+    def list_agents(self) -> list[dict[str, object]]:
+        return list(self.catalog()["agents"])  # type: ignore[arg-type]
+
+    def _mutate_catalog(
+        self,
+        operation: str,
+        mutation: Callable[[Catalog], Catalog],
+    ) -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            manifest, source = self._read_manifest()
+            if not manifest:
+                raise ManagerError("not_configured", "Multi Relay is not installed.")
+            current = self._active_catalog(manifest, source, require_owned=False)
+            return self._apply_catalog_locked(
+                mutation(current),
+                manifest,
+                source,
+                operation=operation,
+            )
+
+    def add_provider(self, provider: ProviderSpec | dict[str, object]) -> dict[str, Any]:
+        selected = provider if isinstance(provider, ProviderSpec) else ProviderSpec.from_dict(provider)
+
+        def mutate(catalog: Catalog) -> Catalog:
+            if any(item.id.casefold() == selected.id.casefold() for item in catalog.providers):
+                raise ManagerError(
+                    "duplicate_provider",
+                    f"Provider {selected.id} already exists.",
+                    {"provider": selected.id},
+                )
+            payload = catalog.to_dict()
+            providers = payload["providers"]
+            assert isinstance(providers, list)
+            providers.append(selected.to_dict())
+            return Catalog.from_dict(payload)
+
+        return self._mutate_catalog("provider-add", mutate)
+
+    def remove_provider(
+        self,
+        provider_id: str,
+        *,
+        remove_credential: bool = False,
+    ) -> dict[str, Any]:
+        removed: list[ProviderSpec] = []
+
+        def mutate(catalog: Catalog) -> Catalog:
+            provider = catalog.provider(provider_id)
+            users = [item.name for item in catalog.agents if item.provider == provider.id]
+            if users:
+                raise ManagerError(
+                    "provider_in_use",
+                    f"Provider {provider.id} is still used by catalog agents.",
+                    {"provider": provider.id, "agents": users},
+                )
+            removed.append(provider)
+            payload = catalog.to_dict()
+            providers = payload["providers"]
+            assert isinstance(providers, list)
+            payload["providers"] = [
+                item
+                for item in providers
+                if isinstance(item, dict) and item.get("id") != provider.id
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("provider-remove", mutate)
+        if remove_credential and removed and removed[0].auth == "vault":
+            self._credential_for(removed[0]).remove()
+        return result
+
+    def set_agent(self, agent: AgentSpec | dict[str, object]) -> dict[str, Any]:
+        selected = agent if isinstance(agent, AgentSpec) else AgentSpec.from_dict(agent)
+
+        def mutate(catalog: Catalog) -> Catalog:
+            payload = catalog.to_dict()
+            current_agents = payload["agents"]
+            assert isinstance(current_agents, list)
+            agents = [
+                item
+                for item in current_agents
+                if isinstance(item, dict)
+                and str(item.get("name", "")).casefold() != selected.name.casefold()
+            ]
+            agents.append(selected.to_dict())
+            payload["agents"] = agents
+            return Catalog.from_dict(payload)
+
+        return self._mutate_catalog("agent-set", mutate)
+
+    def remove_agent(self, name: str) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            selected = catalog.agent(name)
+            payload = catalog.to_dict()
+            current_agents = payload["agents"]
+            assert isinstance(current_agents, list)
+            payload["agents"] = [
+                item
+                for item in current_agents
+                if isinstance(item, dict) and item.get("name") != selected.name
+            ]
+            return Catalog.from_dict(payload)
+
+        return self._mutate_catalog("agent-remove", mutate)
+
+    def route(
+        self,
+        capabilities: set[str] | frozenset[str],
+        *,
+        high_risk: bool = False,
+    ) -> dict[str, Any]:
+        manifest, source = self._read_manifest()
+        if not manifest:
+            raise ManagerError("not_configured", "Multi Relay is not installed.")
+        catalog = self._active_catalog(manifest, source, require_owned=False)
+        selected = route_agent(catalog, capabilities, high_risk)
+        if selected is None:
+            return {
+                "status": "parent_required",
+                "required_capabilities": sorted(capabilities),
+                "high_risk": high_risk,
+            }
+        return {
+            "status": "routed",
+            "agent": selected.name,
+            "provider": selected.provider,
+            "model": selected.model,
+            "required_capabilities": sorted(capabilities),
+            "high_risk": high_risk,
+        }
+
+    def status(self) -> dict[str, Any]:
+        manifest, source = self._read_manifest()
+        if not manifest:
+            present = False
+            try:
+                present = self.credentials.exists()
+            except ManagerError:
+                pass
+            return {"status": "not_configured", "credential_present": present}
+        schema = manifest.get("schema_version")
+        if schema != SCHEMA_VERSION:
+            return {
+                "status": "future" if isinstance(schema, int) and schema > SCHEMA_VERSION else "legacy",
+                "schema_version": schema,
+            }
+        try:
+            catalog = self._active_catalog(manifest, source, require_owned=True)
+        except ManagerError:
+            return {"status": "partial", "checks": {"catalog": False}}
+        credential_presence: dict[str, bool] = {}
+        for provider in catalog.providers:
+            if provider.enabled and provider.auth == "vault":
+                try:
+                    credential_presence[provider.id] = self._credential_for(provider).exists()
+                except ManagerError:
+                    credential_presence[provider.id] = False
+        if manifest.get("status") == "disabled":
+            return {
+                "status": "disabled",
+                "providers": [item.id for item in catalog.providers],
+                "agents": [item.name for item in catalog.agents],
+                "credentials": credential_presence,
+            }
+        checks: dict[str, bool] = {"catalog": True}
+        checks.update({f"credential_{key}": value for key, value in credential_presence.items()})
+        try:
+            config = tomllib.loads(self.paths.config.read_text(encoding="utf-8"))
+            providers = config.get("model_providers") or {}
+            for provider in catalog.providers:
+                if not provider.enabled or provider.protocol == "codex-native":
+                    continue
+                entry = providers.get(provider.id) if isinstance(providers, dict) else None
+                expected_url = (
+                    provider.base_url
+                    if provider.protocol == "responses-compatible"
+                    else f"{BRIDGE_BASE_URL}/providers/{provider.id}"
+                )
+                checks[f"provider_{provider.id}"] = (
+                    isinstance(entry, dict)
+                    and entry.get("wire_api") == "responses"
+                    and entry.get("base_url") == expected_url
+                )
+            agents_table = config.get("agents") or {}
+            checks["agents_enabled"] = agents_table.get("enabled") is True
+            limit = agents_table.get("max_concurrent_threads_per_session")
+            checks["concurrency"] = (
+                isinstance(limit, int)
+                and not isinstance(limit, bool)
+                and limit >= catalog.concurrency
+            )
+            features = config.get("features") or {}
+            v2 = features.get("multi_agent_v2") if isinstance(features, dict) else None
+            checks["v2_routing"] = (
+                isinstance(v2, dict)
+                and v2.get("enabled") is True
+                and v2.get("hide_spawn_agent_metadata") is False
+                and v2.get("tool_namespace") == "agents"
+            )
+            v2_limit = v2.get("max_concurrent_threads_per_session") if isinstance(v2, dict) else None
+            checks["v2_concurrency"] = (
+                isinstance(v2_limit, int)
+                and not isinstance(v2_limit, bool)
+                and v2_limit >= catalog.concurrency
+            )
+            expected = expected_agent_files(self.paths.agents_dir, catalog)
+            for path, content in expected.items():
+                checks[f"agent_{path.stem}"] = path.is_file() and path.read_bytes() == content
+            instructions = self.paths.instruction_file.read_text(encoding="utf-8")
+            checks["routing_instructions"] = (
+                INSTRUCTIONS_BEGIN in instructions and INSTRUCTIONS_END in instructions
+            )
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ManagerError):
+            checks["readable_configuration"] = False
+        return {
+            "status": "ready" if checks and all(checks.values()) else "partial",
+            "credential_present": all(credential_presence.values()),
+            "providers": [item.to_dict() for item in catalog.providers],
+            "agents": [item.to_dict() for item in catalog.agents],
+            "checks": checks,
+        }
+
+    def test(self) -> dict[str, Any]:
+        manifest, source = self._read_manifest()
+        if not manifest:
+            raise ManagerError("not_configured", "Multi Relay is not enabled.")
+        self._require_current_schema(manifest)
+        if manifest.get("status") != "enabled":
+            raise ManagerError("not_configured", "Multi Relay is not enabled.")
+        catalog = self._active_catalog(manifest, source, require_owned=True)
+        selection = self._preserved_selection(manifest, catalog)
+        if selection is None:
+            current = self.status()
+            if current.get("status") != "ready":
+                raise ManagerError("compatibility_failed", "Multi Relay configuration is incomplete.")
+            return {"status": "ready", "checks": current.get("checks", {})}
+        report = self._live_acceptance(self.codex_bin, self.paths.home, selection)
+        self._require_report(report, "native", require_full=True)
+        return {"status": "ready", "checks": report.as_checks()}
+
+    def disable(self) -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            manifest, source = self._read_manifest()
+            if not manifest:
+                raise ManagerError("not_configured", "Multi Relay is not installed.")
+            self._require_current_schema(manifest)
+            if manifest.get("status") == "disabled":
+                return {"status": "disabled"}
+            removals = list(self._agent_removals(manifest))
+            removals.extend(self._adoption_removals(source))
+            instructions = (
+                self.paths.instruction_file.read_text(encoding="utf-8")
+                if self.paths.instruction_file.is_file()
+                else ""
+            )
+            self._assert_instruction_markers(instructions)
+            unmanaged = remove_fanout_instructions(instructions)
+            files: dict[Path, bytes] = {}
+            if unmanaged or manifest.get("instruction_file_preexisted"):
+                files[self.paths.instruction_file] = unmanaged.encode("utf-8")
+            elif self.paths.instruction_file.exists():
+                removals.append(self.paths.instruction_file)
+            updated = dict(manifest)
+            updated.pop("backup", None)
+            updated.pop("transaction_targets", None)
+            updated["status"] = "disabled"
+            execute_install_plan(
+                InstallPlan(
+                    files=files,
+                    removals=tuple(dict.fromkeys(removals)),
+                    manifest=updated,
+                    backup_dir=self._backup_dir("disable"),
+                ),
+                self.paths.manifest,
+            )
+            return {"status": "disabled"}
+
+    def enable(self) -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            manifest, source = self._read_manifest()
+            if not manifest:
+                raise ManagerError("not_configured", "Multi Relay is not installed.")
+            self._require_current_schema(manifest)
+            if manifest.get("status") == "enabled":
+                return self.status()
+            catalog = self._active_catalog(manifest, source, require_owned=True)
+            desired = expected_agent_files(self.paths.agents_dir, catalog)
+            self._assert_role_ownership(desired, manifest)
+            instructions = (
+                self.paths.instruction_file.read_text(encoding="utf-8")
+                if self.paths.instruction_file.is_file()
+                else ""
+            )
+            self._assert_instruction_markers(instructions)
+            files = {
+                **desired,
+                self.paths.instruction_file: apply_fanout_instructions(
+                    instructions,
+                    catalog.concurrency,
+                    catalog=catalog,
+                ).encode("utf-8"),
+            }
+            updated = dict(manifest)
+            updated.pop("backup", None)
+            updated.pop("transaction_targets", None)
+            updated["status"] = "enabled"
+            execute_install_plan(
+                InstallPlan(
+                    files=files,
+                    removals=self._adoption_removals(source),
+                    manifest=updated,
+                    backup_dir=self._backup_dir("enable"),
+                ),
+                self.paths.manifest,
+            )
+            return self.status()
+
+    def uninstall(self, remove_credential: bool = False) -> dict[str, Any]:
+        with operation_lock(self._lock_path):
+            manifest, source = self._read_manifest()
+            if not manifest:
+                if remove_credential:
+                    self.credentials.remove()
+                self._bridge_stopper()
+                return {"status": "uninstalled"}
+            self._require_current_schema(manifest)
+            catalog_path = self._catalog_source(source)
+            if not catalog_path.is_file() and source != self.paths.manifest:
+                catalog_path = self.paths.catalog
+            self._require_catalog_owned(manifest, catalog_path)
+            catalog = load_catalog(catalog_path)
+            removals = list(self._agent_removals(manifest))
+            removals.append(catalog_path)
+            removals.extend(self._adoption_removals(source))
+            config = self.paths.config.read_text(encoding="utf-8")
+            original_values = manifest.get("original_values")
+            if not _has_original_values(original_values):
+                raise ManagerError("invalid_manifest", "Original configuration values are missing.")
+            unmanaged_config = remove_codex_config(config, original_values)
+            instructions = (
+                self.paths.instruction_file.read_text(encoding="utf-8")
+                if self.paths.instruction_file.is_file()
+                else ""
+            )
+            self._assert_instruction_markers(instructions)
+            unmanaged_instructions = remove_fanout_instructions(instructions)
+            files: dict[Path, bytes] = {}
+            if unmanaged_config or manifest.get("config_preexisted"):
+                files[self.paths.config] = unmanaged_config.encode("utf-8")
+            elif self.paths.config.exists():
+                removals.append(self.paths.config)
+            if unmanaged_instructions or manifest.get("instruction_file_preexisted"):
+                files[self.paths.instruction_file] = unmanaged_instructions.encode("utf-8")
+            elif self.paths.instruction_file.exists():
+                removals.append(self.paths.instruction_file)
+            transaction = execute_install_plan(
+                InstallPlan(
+                    files=files,
+                    removals=tuple(dict.fromkeys(removals)),
+                    manifest=None,
+                    backup_dir=self._backup_dir("uninstall"),
+                ),
+                self.paths.manifest,
+            )
+            if remove_credential:
+                for provider in catalog.providers:
+                    if provider.auth == "vault":
+                        self._credential_for(provider).remove()
+            self._bridge_stopper()
+            return {"status": "uninstalled", "backup": str(transaction.backup_dir)}

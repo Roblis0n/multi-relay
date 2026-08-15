@@ -1,4 +1,4 @@
-"""Render legacy DeepSeek roles and catalog-driven Codex child agents."""
+"""Render catalog-driven Codex child agents and legacy DeepSeek roles."""
 
 from __future__ import annotations
 

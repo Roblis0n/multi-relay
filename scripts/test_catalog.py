@@ -12,8 +12,8 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout.catalog import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay.catalog import (  # noqa: E402
     AgentSpec,
     Catalog,
     ProviderSpec,
@@ -36,6 +36,10 @@ def provider(**overrides: object) -> dict[str, object]:
         "enabled": True,
     }
     value.update(overrides)
+    if "protocol" in overrides and "auth" not in overrides:
+        value["auth"] = (
+            "codex" if value["protocol"] == "codex-native" else "vault"
+        )
     return value
 
 
@@ -234,6 +238,30 @@ class CatalogValidationTests(unittest.TestCase):
                         )
                     )
                 self.assertEqual(raised.exception.code, "capability_unsupported")
+
+    def test_provider_auth_modes_match_protocol_boundaries(self) -> None:
+        invalid = [
+            provider(id="native", protocol="codex-native", base_url=None, auth="vault"),
+            provider(
+                id="chat",
+                protocol="chat-completions-compatible",
+                base_url="https://chat.example.test/v1",
+                auth="codex",
+                capabilities=["text", "tools"],
+            ),
+            provider(
+                id="deepseek",
+                protocol="deepseek-chat",
+                base_url="https://api.deepseek.com/v1",
+                auth="none",
+                capabilities=["text", "tools"],
+            ),
+        ]
+        for entry in invalid:
+            with self.subTest(entry=entry):
+                with self.assertRaises(ManagerError) as raised:
+                    ProviderSpec.from_dict(entry)
+                self.assertEqual(raised.exception.code, "catalog_invalid")
 
     def test_web_agent_requires_a_concrete_mcp_server(self) -> None:
         for servers in ({}, {"docs": {}}, {"docs": {"url": ""}}):

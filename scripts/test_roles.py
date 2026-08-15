@@ -12,13 +12,13 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout.catalog import Catalog, default_catalog  # noqa: E402
-from deepseek_fanout.model_capabilities import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay.catalog import Catalog, default_catalog  # noqa: E402
+from multi_relay.model_capabilities import (  # noqa: E402
     ModelSelection,
     resolve_effort,
 )
-from deepseek_fanout.roles import (  # noqa: E402
+from multi_relay.roles import (  # noqa: E402
     expected_agent_files,
     render_agent,
 )

@@ -18,15 +18,18 @@ class RelayPublicLayoutTests(unittest.TestCase):
             ROOT / "agents" / "openai.yaml",
             ROOT / "evals" / "evals.json",
             ROOT / "references" / "compatibility.md",
-            ROOT / "scripts" / "relay.py",
-            ROOT / "scripts" / "deepseek_fanout" / "cli.py",
-            ROOT / "configure-relay.cmd",
+            ROOT / "scripts" / "multi_relay.py",
+            ROOT / "scripts" / "multi_relay" / "cli.py",
+            ROOT / "configure-multi-relay.cmd",
         ):
             with self.subTest(path=path):
                 self.assertTrue(path.is_file(), f"missing public Relay file: {path}")
 
         for path in (
             ROOT / "codex-deepseek-subagent",
+            ROOT / "scripts" / "relay.py",
+            ROOT / "scripts" / "deepseek_fanout",
+            ROOT / "configure-relay.cmd",
             ROOT / "docs" / "superpowers",
             ROOT / "GITHUB_UPLOAD.md",
             ROOT / "configure-deepseek-subagents.cmd",
@@ -39,15 +42,16 @@ class RelayPublicLayoutTests(unittest.TestCase):
         match = re.match(r"^---\nname: ([^\n]+)\n", skill)
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group(1), "codex-deepseek-relay")
+        self.assertEqual(match.group(1), "codex-multi-relay")
 
         agent = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("Codex DeepSeek Relay", agent)
-        self.assertIn("$codex-deepseek-relay", agent)
+        self.assertIn("Codex Multi Relay", agent)
+        self.assertIn("$codex-multi-relay", agent)
+        self.assertNotIn("$codex-deepseek-relay", agent)
         self.assertNotIn("$codex-deepseek-subagent", agent)
 
         evals = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
-        self.assertEqual(evals["skill_name"], "codex-deepseek-relay")
+        self.assertEqual(evals["skill_name"], "codex-multi-relay")
 
         license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
         self.assertIn("Copyright (c) 2026 Roblis0n", license_text)

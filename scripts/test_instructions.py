@@ -10,9 +10,9 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout.catalog import default_catalog  # noqa: E402
-from deepseek_fanout.instructions import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay.catalog import default_catalog  # noqa: E402
+from multi_relay.instructions import (  # noqa: E402
     apply_fanout_instructions,
     remove_fanout_instructions,
 )

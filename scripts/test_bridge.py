@@ -19,15 +19,19 @@ from unittest import mock
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout.bridge import (  # noqa: E402
+from multi_relay.bridge import (  # noqa: E402
+    BRIDGE_SERVICE,
     BRIDGE_VERSION,
+    LEGACY_BRIDGE_SERVICE,
     BridgeError,
     ChatStreamTranslator,
     _BridgeServer,
     _completion_as_chunk,
     _explicit_agent_handoffs,
+    _stop_bridge_health,
     build_chat_request,
 )
+from multi_relay.catalog import ProviderSpec  # noqa: E402
 
 
 def _write_rollout(path: Path, payloads: list[dict[str, object]]) -> None:
@@ -66,6 +70,7 @@ def _add_agent_task(
     task_message: str,
     created_at_ms: int,
     handoff_message: str | None = None,
+    model_provider: str = "deepseek",
 ) -> None:
     parent_rollout = home / "sessions" / f"parent-{parent_id}.jsonl"
     child_rollout = home / "sessions" / f"child-{child_id}.jsonl"
@@ -150,7 +155,7 @@ def _add_agent_task(
                 child_id,
                 str(child_rollout),
                 source,
-                "deepseek",
+                model_provider,
                 recipient,
                 created_at_ms,
             ),
@@ -159,6 +164,99 @@ def _add_agent_task(
 
 
 class BridgeRequestTests(unittest.TestCase):
+    def test_new_and_legacy_services_use_their_matching_shutdown_headers(self) -> None:
+        captured: list[urllib.request.Request] = []
+
+        class Response:
+            status = 200
+
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        class Opener:
+            def open(self, request: urllib.request.Request, timeout: float) -> Response:
+                captured.append(request)
+                return Response()
+
+        with mock.patch(
+            "multi_relay.bridge.urllib.request.build_opener",
+            return_value=Opener(),
+        ):
+            self.assertTrue(_stop_bridge_health({"service": BRIDGE_SERVICE, "pid": 101}))
+            self.assertTrue(
+                _stop_bridge_health({"service": LEGACY_BRIDGE_SERVICE, "pid": 202})
+            )
+
+        self.assertEqual(
+            captured[0].get_header("X-codex-multi-relay-bridge-pid"),
+            "101",
+        )
+        self.assertEqual(
+            captured[1].get_header("X-codex-deepseek-bridge-pid"),
+            "202",
+        )
+
+    def test_protected_message_lookup_is_scoped_to_the_routed_provider(self) -> None:
+        vendor = ProviderSpec.from_dict(
+            {
+                "id": "vendor",
+                "name": "Vendor",
+                "protocol": "chat-completions-compatible",
+                "base_url": "https://chat.example.test/v1",
+                "auth": "vault",
+                "capabilities": ["text", "tools"],
+                "context_window": 128000,
+                "enabled": True,
+            }
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            database = home / "state_5.sqlite"
+            ciphertext = "gAAAAABvendor-opaque-payload=="
+            with closing(sqlite3.connect(database)) as connection:
+                connection.execute(
+                    "CREATE TABLE threads ("
+                    "id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, source TEXT NOT NULL, "
+                    "model_provider TEXT NOT NULL, agent_path TEXT, created_at_ms INTEGER)"
+                )
+                _add_agent_task(
+                    connection,
+                    home,
+                    parent_id="parent-vendor",
+                    child_id="child-vendor",
+                    recipient="/root/vendor-worker",
+                    encrypted_content=ciphertext,
+                    task_message="Inspect vendor module.",
+                    created_at_ms=100,
+                    model_provider="vendor",
+                )
+                connection.commit()
+            with mock.patch.dict(os.environ, {"CODEX_HOME": str(home)}):
+                translated = build_chat_request(
+                    {
+                        "model": "vendor-model",
+                        "input": [
+                            {
+                                "type": "agent_message",
+                                "author": "/root",
+                                "recipient": "/root/vendor-worker",
+                                "content": [
+                                    {
+                                        "type": "encrypted_content",
+                                        "encrypted_content": ciphertext,
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    provider=vendor,
+                    allowed_models={"vendor-model"},
+                )
+
+        self.assertIn("Inspect vendor module.", translated.payload["messages"][0]["content"])
     def test_bridge_accepts_new_and_legacy_protected_handoff_markers(self) -> None:
         for label in ("Relay", "DeepSeek"):
             with self.subTest(label=label):
@@ -173,7 +271,7 @@ class BridgeRequestTests(unittest.TestCase):
                 )
 
     def test_handoff_release_uses_a_new_bridge_process_version(self) -> None:
-        self.assertEqual(BRIDGE_VERSION, 2)
+        self.assertGreaterEqual(BRIDGE_VERSION, 3)
 
     def test_bridge_rejects_non_https_non_loopback_upstream(self) -> None:
         server = None

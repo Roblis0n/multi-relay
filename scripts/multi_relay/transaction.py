@@ -241,7 +241,7 @@ def operation_lock(lock_path: Path, timeout_seconds: float = 5.0) -> Iterator[No
             if time.monotonic() >= deadline:
                 raise ManagerError(
                     "operation_in_progress",
-                    "Another DeepSeek fan-out configuration operation is in progress.",
+                "Another Multi Relay configuration operation is in progress.",
                 )
             time.sleep(0.02)
         try:

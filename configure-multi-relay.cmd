@@ -1,22 +1,25 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-title Configure Codex DeepSeek Relay
+title Configure Codex Multi Relay
 
-if defined DEEPSEEK_MANAGER (
+if defined MULTI_RELAY_MANAGER (
+  set "MANAGER=%MULTI_RELAY_MANAGER%"
+) else if defined DEEPSEEK_MANAGER (
   set "MANAGER=%DEEPSEEK_MANAGER%"
 ) else (
-  set "MANAGER=%~dp0scripts\relay.py"
+  set "MANAGER=%~dp0scripts\multi_relay.py"
 )
 
 if not exist "%MANAGER%" (
-  echo DeepSeek setup program was not found:
+  echo Codex Multi Relay setup program was not found:
   echo %MANAGER%
   set "SETUP_EXIT=3"
   goto finish
 )
 
 set "PYTHON_EXE="
-if defined DEEPSEEK_PYTHON set "PYTHON_EXE=%DEEPSEEK_PYTHON%"
+if defined MULTI_RELAY_PYTHON set "PYTHON_EXE=%MULTI_RELAY_PYTHON%"
+if not defined PYTHON_EXE if defined DEEPSEEK_PYTHON set "PYTHON_EXE=%DEEPSEEK_PYTHON%"
 if not defined PYTHON_EXE for /f "delims=" %%P in ('where python.exe 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
 if not defined PYTHON_EXE for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
 
@@ -39,6 +42,7 @@ if defined CODEX_HOME (
   set "TARGET_CODEX_HOME=%USERPROFILE%\.codex"
 )
 
+echo DEFAULT HYBRID SETUP USES DEEPSEEK WORKERS AND A NATIVE CODEX REVIEWER.
 echo PASTE YOUR DEEPSEEK API KEY ON THE NEXT LINE.
 echo Nothing will appear while typing. Paste the key, then press Enter.
 echo.
@@ -52,5 +56,5 @@ if "%SETUP_EXIT%"=="0" (
 ) else (
   echo Setup did not complete. Keep the error message shown above.
 )
-if not defined DEEPSEEK_NO_PAUSE pause
+if not defined MULTI_RELAY_NO_PAUSE if not defined DEEPSEEK_NO_PAUSE pause
 exit /b %SETUP_EXIT%

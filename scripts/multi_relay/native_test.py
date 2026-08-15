@@ -481,7 +481,7 @@ def verify_native_evidence(
     if issues:
         raise ManagerError(
             "native_route_mismatch",
-            "Native DeepSeek fan-out evidence is incomplete or does not match the installed route.",
+            "Native Multi Relay evidence is incomplete or does not match the installed route.",
             {"failed_checks": sorted(set(issues))},
         )
 

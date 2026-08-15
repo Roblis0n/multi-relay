@@ -22,10 +22,10 @@ class SkillContractTests(unittest.TestCase):
 
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group(1), "codex-deepseek-relay")
+        self.assertEqual(match.group(1), "codex-multi-relay")
         self.assertTrue(match.group(2).startswith("Use when "))
         self.assertIn("Codex", match.group(2))
-        self.assertIn("DeepSeek", match.group(2))
+        self.assertIn("multi-provider", match.group(2))
         self.assertLess(len(match.group(2)), 500)
 
     def test_skill_routes_every_lifecycle_action_through_the_manager(self) -> None:
@@ -33,13 +33,23 @@ class SkillContractTests(unittest.TestCase):
 
         for command in (
             "status --json",
-            "setup --json",
+            "setup --preset hybrid --json",
+            "setup --preset native --json",
             "test --json",
             "repair --json",
             "disable --json",
             "enable --json",
             "uninstall --json",
             "uninstall --remove-credential --json",
+            "catalog --json",
+            "apply --json",
+            "provider list --json",
+            "provider add",
+            "provider remove",
+            "agent list --json",
+            "agent set",
+            "agent remove",
+            "route --capability",
         ):
             with self.subTest(command=command):
                 self.assertIn(command, text)
@@ -72,7 +82,7 @@ class SkillContractTests(unittest.TestCase):
                 self.assertNotIn(forbidden, combined)
         self.assertNotRegex(combined, r"[閰鍑瀛绱楠锛銆]{3,}")
 
-    def test_docs_explain_v2_role_selection_and_the_loopback_protocol_bridge(self) -> None:
+    def test_docs_explain_capability_routing_and_supported_protocols(self) -> None:
         skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         compatibility = (
             SKILL_DIR / "references" / "compatibility.md"
@@ -86,6 +96,12 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("127.0.0.1:42137", combined)
         self.assertIn("Responses", combined)
         self.assertIn("Chat Completions", combined)
+        self.assertIn("codex-native", combined)
+        self.assertIn("responses-compatible", combined)
+        self.assertIn("chat-completions-compatible", combined)
+        self.assertIn("deepseek-chat", combined)
+        for capability in ("vision", "audio", "web", "high-risk"):
+            self.assertIn(capability, combined)
         self.assertNotIn("DeepSeek 官方模型目录与 Responses 兼容接口", combined)
 
     def test_evals_cover_setup_fanout_sequential_lifecycle_and_redaction(self) -> None:
@@ -137,10 +153,11 @@ class SkillContractTests(unittest.TestCase):
             for name in ("README.md", "README_EN.md")
         )
 
-        self.assertIn("Codex DeepSeek Relay", readmes[0])
+        self.assertIn("Codex Multi Relay", readmes[0])
         legacy_public_repo = "Roblis0n/" + "codex-deepseek-" + "subagent"
         for text in readmes:
-            self.assertIn("Roblis0n/codex-deepseek-relay", text)
+            self.assertIn("Roblis0n/codex-multi-relay", text)
+            self.assertNotIn("Roblis0n/codex-deepseek-relay", text)
             self.assertNotIn(legacy_public_repo, text)
         self.assertFalse((ROOT / "GITHUB_UPLOAD.md").exists())
 
@@ -153,7 +170,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("[English](./README_EN.md)", chinese)
         self.assertIn("[简体中文](./README.md) | English", english)
         for required in (
-            "Codex DeepSeek Relay",
+            "Codex Multi Relay",
             "deepseek-v4-pro",
             "multi_agent_v2",
             'fork_turns="none"',
@@ -179,7 +196,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn('./assets/readme/hero.png', readme)
         self.assertNotIn('./assets/readme/hero.svg', readme)
         self.assertIn(
-            'alt="Codex 父任务经本机 Relay 原生扇出到 8 个 DeepSeek 子代理"',
+            'alt="Codex 父任务按能力路由到多模型子代理，联网、视觉、音频和高风险任务保留在主代理"',
             readme,
         )
         self.assertNotIn('alt="ChatGPT', readme)
@@ -194,9 +211,9 @@ class SkillContractTests(unittest.TestCase):
         self.assertNotIn('hero.svg', builder)
         visual_text = "\n".join((readme, workflow, builder))
         self.assertIn("deepseek-v4-pro", visual_text)
-        for role in ("default", "worker", "explorer"):
+        for role in ("default", "worker", "explorer", "reviewer"):
             self.assertIn(role, visual_text)
-        self.assertIn("8-way fan-out", visual_text.lower())
+        self.assertIn("capability routing", visual_text.lower())
         self.assertNotIn("v4-flash", visual_text)
         self.assertNotRegex(visual_text, r"[閰鍑瀛绱楠锛銆]{3,}")
 

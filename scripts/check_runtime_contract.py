@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "scripts" / "deepseek_fanout"
+PACKAGE = ROOT / "scripts" / "multi_relay"
 FORBIDDEN = (
     "multi_agent_version",
     "multi_agent_v2 = false",
@@ -15,10 +15,31 @@ FORBIDDEN = (
     "model_catalog_json",
     "deepseek-v4-flash",
     "DeepSeek.toml",
+    "Codex DeepSeek Relay",
+    "deepseek_fanout",
+    "DeepSeek fan-out",
+    "codex-deepseek-relay",
+    "codex-deepseek-subagent",
+    "CODEX-DEEPSEEK-FANOUT",
+    "CODEX-DEEPSEEK-SUBAGENT",
+    "codex-deepseek-responses-bridge",
+    "X-Codex-DeepSeek-Bridge-Pid",
+    "codex-deepseek-reasoning-v1",
+    "codex-deepseek-api-key",
 )
 ALLOWED = {
     "migration.py": set(FORBIDDEN),
     "compatibility.py": {"model_catalog_json"},
+    "paths.py": {"codex-deepseek-relay", "codex-deepseek-subagent"},
+    "instructions.py": {"CODEX-DEEPSEEK-FANOUT"},
+    "toml_config.py": {"CODEX-DEEPSEEK-FANOUT"},
+    "credentials.py": {"codex-deepseek-api-key"},
+    "bridge.py": {
+        "codex-deepseek-relay",
+        "codex-deepseek-responses-bridge",
+        "X-Codex-DeepSeek-Bridge-Pid",
+        "codex-deepseek-reasoning-v1",
+    },
 }
 
 

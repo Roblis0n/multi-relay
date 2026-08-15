@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="460" viewBox="0 0 1600 460" role="img" aria-labelledby="title desc">
   <title id="title">Relay setup and verification workflow</title>
-  <desc id="desc">Credential storage, DeepSeek model probing, transactional installation, native eight-way fan-out, verification, and automatic rollback.</desc>
+  <desc id="desc">Provider-scoped credential storage, model probing, transactional catalog installation, capability routing, verification, and automatic rollback.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#8495ad" stroke-width="1" opacity=".05"/>
@@ -34,37 +34,37 @@
   <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">CREDENTIAL</text>
   <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">system credential store</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">NO KEY IN LOGS</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">PROVIDER SCOPED</text>
 </g>
 <g transform="translate(360 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">02</text>
   <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">MODEL PROBE</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">deepseek-v4-pro</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">provider catalog</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">HIGHEST EFFORT</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">EXACT MODEL</text>
 </g>
 <g transform="translate(666 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">03</text>
   <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">TRANSACTION</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">atomic install</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">atomic catalog apply</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
   <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">BACKUP FIRST</text>
 </g>
 <g transform="translate(972 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">04</text>
-  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">NATIVE FAN-OUT</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">default • worker • explorer</text>
+  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">CAPABILITY ROUTE</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">VISION • AUDIO • WEB</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">8-WAY FAN-OUT</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">HIGH-RISK → TRUST</text>
 </g>
 <g transform="translate(1278 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#42d392" stroke-opacity=".72"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">05</text>
   <text x="22" y="72" fill="#42d392" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">VERIFY</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">real Codex acceptance</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">parent owns final check</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
   <text x="22" y="148" fill="#42d392" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">READY</text>
 </g>
@@ -79,6 +79,6 @@
   <text x="20" y="46" fill="#f2b84b" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1">ROLLBACK</text>
   <text x="238" y="37" fill="#8495ad" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="0.6">AUTO RESTORE</text>
 </g>
-<text x="54" y="404" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.5">CREDENTIAL → MODEL PROBE → TRANSACTION → 8-WAY FAN-OUT → VERIFY</text>
-<text x="1546" y="438" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1">codex-deepseek-relay</text>
+<text x="54" y="404" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.5">CREDENTIAL → MODEL PROBE → TRANSACTION → CAPABILITY ROUTING → VERIFY</text>
+<text x="1546" y="438" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1">codex-multi-relay</text>
 </svg>

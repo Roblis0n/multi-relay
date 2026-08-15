@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -13,12 +14,14 @@ from unittest import mock
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout import ManagerError  # noqa: E402
-from deepseek_fanout import credential_helper  # noqa: E402
-from deepseek_fanout.credentials import (  # noqa: E402
+from multi_relay import ManagerError  # noqa: E402
+from multi_relay import credential_helper  # noqa: E402
+from multi_relay.credentials import (  # noqa: E402
     CREDENTIAL_TARGET,
     MacOSCredentialStore,
     WindowsCredentialStore,
+    credential_store,
+    credential_target,
     prompt_and_store,
     provider_auth_command,
 )
@@ -61,6 +64,47 @@ class FakeMacOSApi:
 
 
 class CredentialTests(unittest.TestCase):
+    def test_credential_targets_are_provider_scoped_with_deepseek_legacy_compatibility(self) -> None:
+        self.assertEqual(credential_target("deepseek", "deepseek-chat"), CREDENTIAL_TARGET)
+        self.assertEqual(
+            credential_target("vendor-one", "chat-completions-compatible"),
+            "codex-multi-relay-vendor-one-api-key",
+        )
+
+    def test_generic_store_accepts_provider_token_and_uses_scoped_target(self) -> None:
+        api = FakeWindowsApi()
+        store = WindowsCredentialStore(
+            api=api,
+            account="local-user",
+            target="codex-multi-relay-vendor-api-key",
+            protocol="chat-completions-compatible",
+        )
+
+        store.store("provider-token")
+
+        self.assertEqual(
+            api.write_calls,
+            [("codex-multi-relay-vendor-api-key", "local-user", "provider-token")],
+        )
+
+    def test_custom_deepseek_provider_uses_protocol_aware_secret_validation(self) -> None:
+        api = FakeWindowsApi()
+        with mock.patch(
+            "multi_relay.credentials._Win32CredentialApi",
+            return_value=api,
+        ):
+            store = credential_store(
+                "windows",
+                provider_id="ds-custom",
+                protocol="deepseek-chat",
+            )
+
+        with self.assertRaises(ManagerError) as raised:
+            store.store("ordinary-provider-token")
+
+        self.assertEqual(raised.exception.code, "invalid_api_key")
+        self.assertEqual(api.write_calls, [])
+
     def test_windows_store_delegates_to_credential_blob_api_without_subprocess(self) -> None:
         api = FakeWindowsApi()
         store = WindowsCredentialStore(api=api, account="local-user")
@@ -122,6 +166,69 @@ class CredentialTests(unittest.TestCase):
         self.assertTrue(Path(command[1]).is_absolute())
         self.assertFalse(any(part.startswith("sk-") for part in command))
 
+    def test_provider_auth_command_scopes_provider_and_bridge_start_without_secret(self) -> None:
+        command = provider_auth_command(
+            "vendor",
+            start_bridge=False,
+            protocol="responses-compatible",
+        )
+
+        self.assertIn("--provider", command)
+        self.assertIn("vendor", command)
+        self.assertIn("--no-start-bridge", command)
+        self.assertEqual(
+            command[command.index("--protocol") + 1],
+            "responses-compatible",
+        )
+        self.assertFalse(any("provider-token" in part for part in command))
+
+    def test_provider_auth_command_carries_an_explicit_codex_home_without_secret(self) -> None:
+        command = provider_auth_command(
+            "vendor",
+            codex_home=Path("C:/Users/test/.codex"),
+            protocol="responses-compatible",
+        )
+
+        self.assertEqual(command[-2:], ["--codex-home", "C:\\Users\\test\\.codex"])
+
+    def test_custom_provider_requires_an_explicit_protocol(self) -> None:
+        for operation in (
+            lambda: provider_auth_command("vendor"),
+            lambda: credential_store("windows", provider_id="vendor"),
+        ):
+            with self.subTest(operation=operation):
+                with self.assertRaises(ManagerError) as raised:
+                    operation()
+                self.assertEqual(raised.exception.code, "catalog_invalid")
+
+    def test_credential_helper_can_read_direct_provider_without_starting_bridge(self) -> None:
+        store = mock.Mock()
+        store.read.return_value = "provider-token"
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(credential_helper, "credential_store", return_value=store) as factory,
+            mock.patch.object(credential_helper, "ensure_bridge") as ensure,
+            redirect_stdout(stdout),
+        ):
+            code = credential_helper.main(
+                [
+                    "--provider",
+                    "vendor",
+                    "--protocol",
+                    "responses-compatible",
+                    "--no-start-bridge",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        factory.assert_called_once_with(
+            provider_id="vendor",
+            protocol="responses-compatible",
+        )
+        ensure.assert_not_called()
+        self.assertEqual(stdout.getvalue(), "provider-token")
+
     def test_credential_helper_writes_only_raw_secret(self) -> None:
         store = mock.Mock()
         store.read.return_value = "sk-test"
@@ -140,6 +247,31 @@ class CredentialTests(unittest.TestCase):
         ensure.assert_called_once_with()
         self.assertEqual(stdout.getvalue(), "sk-test")
         self.assertEqual(stderr.getvalue(), "")
+
+    def test_credential_helper_forwards_explicit_codex_home_to_bridge(self) -> None:
+        store = mock.Mock()
+        store.read.return_value = "provider-token"
+        with tempfile.TemporaryDirectory() as directory:
+            selected_home = Path(directory).resolve()
+            with (
+                mock.patch.object(credential_helper, "credential_store", return_value=store),
+                mock.patch.object(credential_helper, "ensure_bridge") as ensure,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                code = credential_helper.main(
+                    [
+                        "--provider",
+                        "vendor",
+                        "--protocol",
+                        "chat-completions-compatible",
+                        "--codex-home",
+                        str(selected_home),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        ensure.assert_called_once_with(codex_home=selected_home)
 
     def test_credential_helper_prints_nothing_when_bridge_cannot_start(self) -> None:
         store = mock.Mock()

@@ -1,4 +1,4 @@
-"""Domain errors returned by the DeepSeek fan-out manager."""
+"""Domain errors returned by Codex Multi Relay."""
 
 from __future__ import annotations
 

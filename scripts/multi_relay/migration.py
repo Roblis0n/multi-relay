@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .catalog import Catalog, default_catalog
 from .errors import ManagerError
 from .paths import Paths
 from .toml_config import _remove_table_key, _set_table_value
@@ -26,6 +27,32 @@ class LegacyMigration:
     config_text: str
     files: dict[Path, bytes]
     removals: tuple[Path, ...]
+
+
+def catalog_from_schema4(manifest: dict[str, Any]) -> Catalog:
+    """Convert the former single-provider manifest into a schema-1 catalog."""
+
+    if manifest.get("schema_version") != 4:
+        raise ManagerError("invalid_manifest", "A schema-4 Relay manifest is required.")
+    selection = manifest.get("selection")
+    if not isinstance(selection, dict):
+        raise ManagerError("invalid_manifest", "The legacy model selection is missing.")
+    model = selection.get("resolved_model")
+    effort = selection.get("reasoning_effort")
+    if not isinstance(model, str) or not model.strip():
+        raise ManagerError("invalid_manifest", "The legacy model selection is invalid.")
+    if effort is not None and not isinstance(effort, str):
+        raise ManagerError("invalid_manifest", "The legacy reasoning effort is invalid.")
+    concurrency = manifest.get("concurrency", 8)
+    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+        raise ManagerError("invalid_manifest", "The legacy concurrency value is invalid.")
+    payload = default_catalog("hybrid").to_dict()
+    payload["concurrency"] = concurrency
+    for agent in payload["agents"]:
+        if isinstance(agent, dict) and agent.get("provider") == "deepseek":
+            agent["model"] = model
+            agent["reasoning_effort"] = effort
+    return Catalog.from_dict(payload)
 
 
 def _normalize(text: str) -> str:

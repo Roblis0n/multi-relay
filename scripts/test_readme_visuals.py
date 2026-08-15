@@ -131,7 +131,7 @@ class ReadmeVisualTests(unittest.TestCase):
                 children = elements_with(root, "data-node", "child")
                 self.assertEqual(len(children), 8, name)
                 roles = {node.attrib["data-role"] for node in children}
-                self.assertEqual(roles, {"default", "worker", "explorer"})
+                self.assertEqual(roles, {"default", "worker", "explorer", "reviewer"})
 
     def test_generated_assets_explain_the_relay_contract(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -146,19 +146,22 @@ class ReadmeVisualTests(unittest.TestCase):
 
             for label in (
                 "AUDITED HANDOFF",
-                "LOCAL LOOPBACK",
-                "127.0.0.1:42137",
-                "NATIVE FAN-OUT ×8",
+                "CAPABILITY ROUTING",
+                "UP TO 8 CHILDREN",
                 "default",
                 "worker",
                 "explorer",
+                "reviewer",
             ):
                 self.assertIn(label, hero_text)
             for label in (
                 "CODEX PARENT",
                 "VISIBLE HANDOFF",
                 "LOCAL RELAY",
-                "DEEPSEEK CHILDREN",
+                "MODEL PROVIDERS",
+                "NATIVE CODEX",
+                "RESPONSES API",
+                "CHAT COMPLETIONS",
                 "TOOL CALLS",
                 "SAFE PROGRESS",
             ):
@@ -167,6 +170,8 @@ class ReadmeVisualTests(unittest.TestCase):
                 self.assertIn(label, workflow_text)
             self.assertIn("system credential store", workflow_text)
             self.assertNotIn("system keychain", workflow_text)
+            for boundary in ("VISION", "AUDIO", "WEB", "HIGH-RISK"):
+                self.assertIn(boundary, workflow_text)
 
     def test_generated_svgs_never_embed_vendor_images(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:

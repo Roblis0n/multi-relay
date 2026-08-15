@@ -16,7 +16,7 @@ from unittest import mock
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from deepseek_fanout.cli import build_parser, find_codex, main  # noqa: E402
+from multi_relay.cli import build_parser, find_codex, main  # noqa: E402
 
 
 class FakeStore:
@@ -46,9 +46,58 @@ class FakeManager:
         self.calls.append(("status", None))
         return {"status": "not_configured"}
 
-    def setup(self) -> dict[str, object]:
-        self.calls.append(("setup", None))
+    def setup(self, preset: str = "hybrid") -> dict[str, object]:
+        self.calls.append(("setup", preset))
         return {"status": "ready", "model": "deepseek-v4-pro"}
+
+    def repair(self) -> dict[str, object]:
+        self.calls.append(("repair", None))
+        return {"status": "ready"}
+
+    def catalog(self) -> dict[str, object]:
+        self.calls.append(("catalog", None))
+        return {"schema_version": 1, "concurrency": 8, "providers": [], "agents": []}
+
+    def list_providers(self) -> list[dict[str, object]]:
+        self.calls.append(("provider-list", None))
+        return []
+
+    def add_provider(self, provider: object) -> dict[str, object]:
+        self.calls.append(("provider-add", provider))
+        return {"status": "ready"}
+
+    def remove_provider(
+        self,
+        provider_id: str,
+        *,
+        remove_credential: bool = False,
+    ) -> dict[str, object]:
+        self.calls.append(("provider-remove", (provider_id, remove_credential)))
+        return {"status": "ready"}
+
+    def credential_for_provider(self, provider: object) -> FakeStore:
+        self.calls.append(("credential-for", provider))
+        return self.credentials
+
+    def list_agents(self) -> list[dict[str, object]]:
+        self.calls.append(("agent-list", None))
+        return []
+
+    def set_agent(self, agent: object) -> dict[str, object]:
+        self.calls.append(("agent-set", agent))
+        return {"status": "ready"}
+
+    def remove_agent(self, name: str) -> dict[str, object]:
+        self.calls.append(("agent-remove", name))
+        return {"status": "ready"}
+
+    def route(self, capabilities: set[str], *, high_risk: bool = False) -> dict[str, object]:
+        self.calls.append(("route", (capabilities, high_risk)))
+        return {"status": "parent_required"}
+
+    def apply(self) -> dict[str, object]:
+        self.calls.append(("apply", None))
+        return {"status": "ready"}
 
     def test(self) -> dict[str, object]:
         self.calls.append(("test", None))
@@ -77,7 +126,7 @@ class CliTests(unittest.TestCase):
             with (
                 mock.patch.dict(os.environ, {"CODEX_HOME": str(home)}, clear=False),
                 mock.patch(
-                    "deepseek_fanout.cli.shutil.which",
+            "multi_relay.cli.shutil.which",
                     return_value=r"C:\Program Files\WindowsApps\Codex\codex.exe",
                 ),
             ):
@@ -105,7 +154,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(store.secret, "sk-test")
-        self.assertEqual(manager.calls, [("setup", None)])
+        self.assertEqual(manager.calls, [("setup", "hybrid")])
         self.assertEqual(json.loads(stdout.getvalue())["status"], "ready")
         self.assertNotIn("sk-test", stdout.getvalue())
         self.assertNotIn("sk-test", stderr.getvalue())
@@ -143,6 +192,102 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(manager.calls, [("uninstall", True)])
+
+    def test_native_setup_does_not_prompt_for_deepseek(self) -> None:
+        manager = FakeManager(FakeStore())
+        prompts = 0
+
+        def prompt(_: str) -> str:
+            nonlocal prompts
+            prompts += 1
+            return "should-not-be-used"
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main(
+                ["setup", "--preset", "native", "--json"],
+                manager_factory=lambda args: manager,
+                prompt_fn=prompt,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(prompts, 0)
+        self.assertEqual(manager.calls, [("setup", "native")])
+
+    def test_provider_add_builds_valid_definition_and_prompts_only_vault(self) -> None:
+        manager = FakeManager(FakeStore())
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            code = main(
+                [
+                    "provider",
+                    "add",
+                    "--id",
+                    "vendor",
+                    "--name",
+                    "Vendor",
+                    "--protocol",
+                    "responses-compatible",
+                    "--base-url",
+                    "https://api.vendor.test/v1",
+                    "--auth",
+                    "vault",
+                    "--capability",
+                    "text",
+                    "--capability",
+                    "tools",
+                    "--json",
+                ],
+                manager_factory=lambda args: manager,
+                prompt_fn=lambda _: "provider-token",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(manager.credentials.secret, "provider-token")
+        self.assertEqual(manager.calls[0][0], "credential-for")
+        self.assertEqual(manager.calls[1][0], "provider-add")
+        provider = manager.calls[1][1]
+        self.assertEqual(provider.id, "vendor")
+        self.assertEqual(provider.protocol, "responses-compatible")
+
+    def test_agent_set_and_route_dispatch_structured_boundaries(self) -> None:
+        manager = FakeManager(FakeStore("sk-test"))
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            set_code = main(
+                [
+                    "agent",
+                    "set",
+                    "--name",
+                    "vendor-worker",
+                    "--description",
+                    "Vendor worker",
+                    "--provider",
+                    "vendor",
+                    "--model",
+                    "vendor-model",
+                    "--capability",
+                    "text",
+                    "--trust",
+                    "standard",
+                    "--priority",
+                    "5",
+                    "--sandbox-mode",
+                    "workspace-write",
+                    "--instructions",
+                    "Complete the bounded task.",
+                    "--json",
+                ],
+                manager_factory=lambda args: manager,
+            )
+            route_code = main(
+                ["route", "--capability", "vision", "--high-risk", "--json"],
+                manager_factory=lambda args: manager,
+            )
+
+        self.assertEqual(set_code, 0)
+        self.assertEqual(route_code, 0)
+        self.assertEqual(manager.calls[0][0], "agent-set")
+        self.assertEqual(manager.calls[1], ("route", ({"vision"}, True)))
 
 
 if __name__ == "__main__":

@@ -253,6 +253,12 @@ class ProviderSpec:
         auth = _nonempty_string(data["auth"], "provider.auth")
         if auth not in AUTH_MODES:
             raise _invalid(f"Unsupported provider auth mode: {auth}.", field="provider.auth")
+        if protocol == "codex-native" and auth != "codex":
+            raise _invalid("codex-native providers must use Codex authentication.", field="provider.auth")
+        if protocol != "codex-native" and auth == "codex":
+            raise _invalid("Custom providers must use vault or no authentication.", field="provider.auth")
+        if protocol == "deepseek-chat" and auth != "vault":
+            raise _invalid("DeepSeek chat providers require vault authentication.", field="provider.auth")
         capabilities = _capability_set(data["capabilities"], "provider.capabilities")
         if protocol in {"chat-completions-compatible", "deepseek-chat"} and capabilities & {
             "vision",

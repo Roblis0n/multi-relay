@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -13,6 +14,17 @@ from .errors import ManagerError
 
 
 CREDENTIAL_TARGET = "codex-deepseek-api-key"
+_PROVIDER_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def credential_target(provider_id: str, protocol: str | None = None) -> str:
+    """Return the vault target for one provider without exposing a secret."""
+
+    if not isinstance(provider_id, str) or not _PROVIDER_ID.fullmatch(provider_id):
+        raise ManagerError("catalog_invalid", "Provider identifier is invalid.")
+    if provider_id == "deepseek":
+        return CREDENTIAL_TARGET
+    return f"codex-multi-relay-{provider_id}-api-key"
 
 
 class CredentialStore(Protocol):
@@ -25,9 +37,25 @@ class CredentialStore(Protocol):
     def remove(self) -> bool: ...
 
 
-def _validate_secret(secret: str) -> None:
-    if not secret.startswith("sk-") or any(character in secret for character in "\r\n\0"):
+def _validate_secret(secret: str, protocol: str) -> None:
+    if not isinstance(secret, str) or not secret or any(
+        character in secret for character in "\r\n\0"
+    ):
+        raise ManagerError("invalid_api_key", "Enter a valid provider credential.")
+    if protocol == "deepseek-chat" and not secret.startswith("sk-"):
         raise ManagerError("invalid_api_key", "Enter a valid DeepSeek API Key.")
+
+
+def _selected_protocol(provider_id: str, protocol: str | None) -> str:
+    if protocol is not None:
+        return protocol
+    if provider_id == "deepseek":
+        return "deepseek-chat"
+    raise ManagerError(
+        "catalog_invalid",
+        "Custom providers require an explicit protocol for credential handling.",
+        {"provider": provider_id},
+    )
 
 
 class _Win32CredentialApi:
@@ -121,39 +149,48 @@ class _Win32CredentialApi:
 
 
 class WindowsCredentialStore:
-    def __init__(self, api: object | None = None, account: str | None = None) -> None:
+    def __init__(
+        self,
+        api: object | None = None,
+        account: str | None = None,
+        *,
+        target: str = CREDENTIAL_TARGET,
+        protocol: str = "deepseek-chat",
+    ) -> None:
         self._api = api or _Win32CredentialApi()
         self._account = account or getpass.getuser()
+        self._target = target
+        self._protocol = protocol
 
     def read(self) -> str | None:
         try:
-            return self._api.read(CREDENTIAL_TARGET)  # type: ignore[attr-defined]
+            return self._api.read(self._target)  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_read_failed",
-                "Windows Credential Manager could not read the DeepSeek credential.",
+                "Windows Credential Manager could not read the provider credential.",
             ) from None
 
     def exists(self) -> bool:
         return self.read() is not None
 
     def store(self, secret: str) -> None:
-        _validate_secret(secret)
+        _validate_secret(secret, self._protocol)
         try:
-            self._api.write(CREDENTIAL_TARGET, self._account, secret)  # type: ignore[attr-defined]
+            self._api.write(self._target, self._account, secret)  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_write_failed",
-                "Windows Credential Manager could not store the DeepSeek credential.",
+                "Windows Credential Manager could not store the provider credential.",
             ) from None
 
     def remove(self) -> bool:
         try:
-            return bool(self._api.delete(CREDENTIAL_TARGET))  # type: ignore[attr-defined]
+            return bool(self._api.delete(self._target))  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_delete_failed",
-                "Windows Credential Manager could not remove the DeepSeek credential.",
+                "Windows Credential Manager could not remove the provider credential.",
             ) from None
 
 
@@ -308,61 +345,96 @@ class _MacOSKeychainApi:
 
 
 class MacOSCredentialStore:
-    def __init__(self, api: object | None = None, account: str | None = None) -> None:
+    def __init__(
+        self,
+        api: object | None = None,
+        account: str | None = None,
+        *,
+        target: str = CREDENTIAL_TARGET,
+        protocol: str = "deepseek-chat",
+    ) -> None:
         self._api = api or _MacOSKeychainApi()
         self._account = account or getpass.getuser()
+        self._target = target
+        self._protocol = protocol
 
     def read(self) -> str | None:
         try:
-            return self._api.read(CREDENTIAL_TARGET, self._account)  # type: ignore[attr-defined]
+            return self._api.read(self._target, self._account)  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_read_failed",
-                "macOS Keychain could not read the DeepSeek credential.",
+                "macOS Keychain could not read the provider credential.",
             ) from None
 
     def exists(self) -> bool:
         return self.read() is not None
 
     def store(self, secret: str) -> None:
-        _validate_secret(secret)
+        _validate_secret(secret, self._protocol)
         try:
-            self._api.write(CREDENTIAL_TARGET, self._account, secret)  # type: ignore[attr-defined]
+            self._api.write(self._target, self._account, secret)  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_write_failed",
-                "macOS Keychain could not store the DeepSeek credential.",
+                "macOS Keychain could not store the provider credential.",
             ) from None
 
     def remove(self) -> bool:
         try:
-            return bool(self._api.delete(CREDENTIAL_TARGET, self._account))  # type: ignore[attr-defined]
+            return bool(self._api.delete(self._target, self._account))  # type: ignore[attr-defined]
         except Exception:
             raise ManagerError(
                 "credential_delete_failed",
-                "macOS Keychain could not remove the DeepSeek credential.",
+                "macOS Keychain could not remove the provider credential.",
             ) from None
 
 
-def credential_store(platform: str | None = None) -> CredentialStore:
+def credential_store(
+    platform: str | None = None,
+    *,
+    provider_id: str = "deepseek",
+    protocol: str | None = None,
+) -> CredentialStore:
     """Return the current platform's protected credential store."""
 
+    selected_protocol = _selected_protocol(provider_id, protocol)
+    target = credential_target(provider_id, selected_protocol)
     selected = platform or ("windows" if os.name == "nt" else sys.platform)
     if selected in {"windows", "win32"}:
-        return WindowsCredentialStore()
+        return WindowsCredentialStore(target=target, protocol=selected_protocol)
     if selected in {"darwin", "macos"}:
-        return MacOSCredentialStore()
+        return MacOSCredentialStore(target=target, protocol=selected_protocol)
     raise ManagerError(
         "unsupported_platform",
-        "DeepSeek credential storage supports Windows and macOS only.",
+        "Multi Relay credential storage supports Windows and macOS only.",
     )
 
 
-def provider_auth_command() -> list[str]:
+def provider_auth_command(
+    provider_id: str = "deepseek",
+    codex_home: Path | None = None,
+    start_bridge: bool = True,
+    *,
+    protocol: str | None = None,
+) -> list[str]:
     """Return a stable command that prints the protected key to Codex only."""
 
     helper = Path(__file__).with_name("credential_helper.py").resolve()
-    return [sys.executable, str(helper)]
+    selected_protocol = _selected_protocol(provider_id, protocol)
+    command = [
+        sys.executable,
+        str(helper),
+        "--provider",
+        provider_id,
+        "--protocol",
+        selected_protocol,
+    ]
+    if not start_bridge:
+        command.append("--no-start-bridge")
+    if codex_home is not None:
+        command.extend(["--codex-home", str(codex_home)])
+    return command
 
 
 def prompt_and_store(
@@ -371,6 +443,5 @@ def prompt_and_store(
 ) -> None:
     """Prompt locally with masking and store without echoing the credential."""
 
-    secret = prompt_fn("DeepSeek API Key (stored in the operating-system credential vault): ")
-    _validate_secret(secret)
+    secret = prompt_fn("Provider API credential (stored in the operating-system credential vault): ")
     store.store(secret)
