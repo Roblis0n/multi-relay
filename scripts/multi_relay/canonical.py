@@ -59,6 +59,8 @@ _CONTENT_FIELDS = frozenset(
         "media_type",
         "data",
         "tool_call_id",
+        "tool_name",
+        "arguments",
         "is_error",
         "result_content",
     }
@@ -105,6 +107,8 @@ class CanonicalContentBlock:
     media_type: str | None = None
     data: str | None = None
     tool_call_id: str | None = None
+    tool_name: str | None = None
+    arguments: str | None = None
     is_error: bool = False
     result_content: tuple["CanonicalContentBlock", ...] = ()
 
@@ -115,7 +119,14 @@ class CanonicalContentBlock:
                 raise _request_invalid("Text blocks require text.")
             if any(
                 value is not None
-                for value in (self.url, self.media_type, self.data, self.tool_call_id)
+                for value in (
+                    self.url,
+                    self.media_type,
+                    self.data,
+                    self.tool_call_id,
+                    self.tool_name,
+                    self.arguments,
+                )
             ) or self.result_content or self.is_error:
                 raise _request_invalid("Text block fields are inconsistent.")
             return
@@ -123,22 +134,59 @@ class CanonicalContentBlock:
             validate_image_url(self.url)
             if any(
                 value is not None
-                for value in (self.text, self.media_type, self.data, self.tool_call_id)
+                for value in (
+                    self.text,
+                    self.media_type,
+                    self.data,
+                    self.tool_call_id,
+                    self.tool_name,
+                    self.arguments,
+                )
             ) or self.result_content or self.is_error:
                 raise _request_invalid("Image URL block fields are inconsistent.")
             return
         if self.kind == "image_base64":
             decode_image_base64(self.media_type, self.data)
-            if any(value is not None for value in (self.text, self.url, self.tool_call_id)):
+            if any(
+                value is not None
+                for value in (
+                    self.text,
+                    self.url,
+                    self.tool_call_id,
+                    self.tool_name,
+                    self.arguments,
+                )
+            ):
                 raise _request_invalid("Base64 image block fields are inconsistent.")
             if self.result_content or self.is_error:
                 raise _request_invalid("Base64 image block fields are inconsistent.")
+            return
+        if self.kind == "tool_call":
+            _nonempty(self.tool_call_id, "tool_call_id")
+            if not isinstance(self.tool_name, str) or not _TOOL_NAME.fullmatch(
+                self.tool_name
+            ):
+                raise _request_invalid("Tool call requires a valid tool name.")
+            if not isinstance(self.arguments, str):
+                raise _request_invalid("Tool call arguments must be a JSON string.")
+            if any(
+                value is not None
+                for value in (self.text, self.url, self.media_type, self.data)
+            ) or self.result_content or self.is_error:
+                raise _request_invalid("Tool call block fields are inconsistent.")
             return
         if self.kind == "tool_result":
             _nonempty(self.tool_call_id, "tool_call_id")
             if any(
                 value is not None
-                for value in (self.text, self.url, self.media_type, self.data)
+                for value in (
+                    self.text,
+                    self.url,
+                    self.media_type,
+                    self.data,
+                    self.tool_name,
+                    self.arguments,
+                )
             ):
                 raise _request_invalid("Tool result block fields are inconsistent.")
             if not isinstance(self.is_error, bool):
@@ -175,6 +223,20 @@ class CanonicalContentBlock:
             result_content=tuple(content),
         )
 
+    @classmethod
+    def tool_call(
+        cls,
+        tool_call_id: str,
+        name: str,
+        arguments: str,
+    ) -> "CanonicalContentBlock":
+        return cls(
+            kind="tool_call",
+            tool_call_id=tool_call_id,
+            tool_name=name,
+            arguments=arguments,
+        )
+
     def decoded_image_bytes(self) -> bytes:
         if self.kind != "image_base64":
             raise _request_invalid("Only base64 image blocks have decoded bytes.")
@@ -188,6 +250,14 @@ class CanonicalContentBlock:
             payload["url"] = self.url
         elif self.kind == "image_base64":
             payload.update({"media_type": self.media_type, "data": self.data})
+        elif self.kind == "tool_call":
+            payload.update(
+                {
+                    "tool_call_id": self.tool_call_id,
+                    "tool_name": self.tool_name,
+                    "arguments": self.arguments,
+                }
+            )
         else:
             payload.update(
                 {
@@ -210,6 +280,12 @@ class CanonicalContentBlock:
             return cls.image_base64(
                 data.get("media_type"),  # type: ignore[arg-type]
                 data.get("data"),  # type: ignore[arg-type]
+            )
+        if kind == "tool_call":
+            return cls.tool_call(
+                data.get("tool_call_id"),  # type: ignore[arg-type]
+                data.get("tool_name"),  # type: ignore[arg-type]
+                data.get("arguments"),  # type: ignore[arg-type]
             )
         if kind == "tool_result":
             raw_content = data.get("result_content", [])
@@ -549,7 +625,9 @@ class CanonicalRequest:
         capabilities = {"text"}
         if _image_blocks(all_blocks):
             capabilities.add("vision")
-        if self.tools or any(block.kind == "tool_result" for block in all_blocks):
+        if self.tools or any(
+            block.kind in {"tool_call", "tool_result"} for block in all_blocks
+        ):
             capabilities.add("tool_calling")
         return frozenset(capabilities)
 

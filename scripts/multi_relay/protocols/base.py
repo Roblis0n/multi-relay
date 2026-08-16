@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+import json
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol
+
+from ..canonical import CanonicalEvent, CanonicalRequest
+from ..errors import ManagerError
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,41 @@ class ProviderAdapter(Protocol):
         payload: object,
         headers: Mapping[str, str],
     ) -> ProviderErrorMetadata: ...
+
+
+class ProtocolAdapter(ProviderAdapter, Protocol):
+    """Complete host-neutral boundary implemented by every wire protocol."""
+
+    protocol: str
+
+    def build_request(
+        self,
+        request: CanonicalRequest,
+        *,
+        model: str,
+    ) -> Mapping[str, Any]: ...
+
+    def parse_response(
+        self,
+        payload: object,
+        *,
+        response_id: str | None = None,
+    ) -> tuple[CanonicalEvent, ...]: ...
+
+    def iter_events(
+        self,
+        chunks: Iterable[bytes | str],
+        *,
+        response_id: str | None = None,
+    ) -> Iterator[CanonicalEvent]: ...
+
+    def classify_error_metadata(
+        self,
+        payload: object,
+        headers: Mapping[str, str],
+    ) -> ProviderErrorMetadata: ...
+
+    def discover_models(self, payload: object) -> tuple[str, ...]: ...
 
 
 def _string(value: object) -> str | None:
@@ -94,3 +133,122 @@ def extract_provider_error(payload: object) -> ProviderErrorMetadata:
         message=message,
         retry_after_seconds=retry_after,
     )
+
+
+def discover_model_ids(payload: object) -> tuple[str, ...]:
+    """Extract a deterministic model id list from common discovery envelopes."""
+
+    if not isinstance(payload, Mapping):
+        return ()
+    raw_models = payload.get("data", payload.get("models", ()))
+    if not isinstance(raw_models, (list, tuple)):
+        return ()
+    models: set[str] = set()
+    for item in raw_models:
+        selected = item.get("id") if isinstance(item, Mapping) else item
+        if isinstance(selected, str) and selected.strip():
+            models.add(selected.strip())
+    return tuple(sorted(models))
+
+
+def _event_boundary(buffer: bytes) -> tuple[int, int] | None:
+    candidates = tuple(
+        (index, len(marker))
+        for marker in (b"\r\n\r\n", b"\n\n", b"\r\r")
+        if (index := buffer.find(marker)) >= 0
+    )
+    return min(candidates) if candidates else None
+
+
+def iter_sse_json(
+    chunks: Iterable[bytes | str],
+    *,
+    max_event_bytes: int = 1024 * 1024,
+) -> Iterator[object]:
+    """Incrementally decode bounded SSE JSON across arbitrary byte boundaries."""
+
+    if (
+        isinstance(max_event_bytes, bool)
+        or not isinstance(max_event_bytes, int)
+        or max_event_bytes < 1
+    ):
+        raise ValueError("max_event_bytes must be a positive integer")
+    buffer = b""
+    closer = getattr(chunks, "close", None)
+
+    def decode_record(record: bytes) -> object | None:
+        normalized = record.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        data_lines: list[bytes] = []
+        for line in normalized.split(b"\n"):
+            if line.startswith(b"data:"):
+                value = line[5:]
+                data_lines.append(value[1:] if value.startswith(b" ") else value)
+        if not data_lines:
+            return None
+        data = b"\n".join(data_lines)
+        if data == b"[DONE]":
+            return _DONE
+        try:
+            return json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            raise ManagerError(
+                "protocol_error",
+                "Upstream SSE event contains invalid JSON.",
+            ) from None
+
+    try:
+        for chunk in chunks:
+            if isinstance(chunk, str):
+                raw = chunk.encode("utf-8")
+            elif isinstance(chunk, (bytes, bytearray)):
+                raw = bytes(chunk)
+            else:
+                raise ManagerError(
+                    "protocol_error",
+                    "Upstream SSE yielded an unsupported chunk type.",
+                )
+            buffer += raw
+            while (boundary := _event_boundary(buffer)) is not None:
+                index, marker_size = boundary
+                record = buffer[:index]
+                buffer = buffer[index + marker_size :]
+                if len(record) > max_event_bytes:
+                    raise ManagerError(
+                        "protocol_error",
+                        "Upstream SSE event exceeds the configured size limit.",
+                    )
+                decoded = decode_record(record)
+                if decoded is _DONE:
+                    return
+                if decoded is not None:
+                    yield decoded
+            if len(buffer) > max_event_bytes:
+                raise ManagerError(
+                    "protocol_error",
+                    "Upstream SSE event exceeds the configured size limit.",
+                )
+        if buffer.strip():
+            if len(buffer) > max_event_bytes:
+                raise ManagerError(
+                    "protocol_error",
+                    "Upstream SSE event exceeds the configured size limit.",
+                )
+            decoded = decode_record(buffer)
+            if decoded is not None and decoded is not _DONE:
+                yield decoded
+    finally:
+        if callable(closer):
+            closer()
+
+
+_DONE = object()
+
+
+__all__ = [
+    "ProtocolAdapter",
+    "ProviderAdapter",
+    "ProviderErrorMetadata",
+    "discover_model_ids",
+    "extract_provider_error",
+    "iter_sse_json",
+]

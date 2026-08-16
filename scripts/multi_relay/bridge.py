@@ -1064,7 +1064,7 @@ def _effort(value: object) -> str:
     return "max" if value in {"ultra", "max", "xhigh"} else "high"
 
 
-def build_chat_request(
+def _legacy_build_chat_request(
     body: dict[str, Any],
     *,
     provider: ProviderSpec | None = None,
@@ -1128,7 +1128,7 @@ def build_chat_request(
     return ChatRequest(payload=payload, tools=dict(registry.routes))
 
 
-class ChatStreamTranslator:
+class _LegacyChatStreamTranslator:
     """Stateful Chat Completions chunk-to-Responses event translator."""
 
     def __init__(
@@ -1468,6 +1468,18 @@ class ChatStreamTranslator:
             }
         )
         return events
+
+
+if __package__ in {None, ""}:
+    from multi_relay.protocols.chat_completions import (
+        ChatStreamTranslator,
+        build_chat_request,
+    )
+else:
+    from .protocols.chat_completions import (
+        ChatStreamTranslator,
+        build_chat_request,
+    )
 
 
 def _json_bytes(value: object) -> bytes:
