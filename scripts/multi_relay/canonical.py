@@ -24,7 +24,9 @@ from .errors import ManagerError
 
 
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-_METADATA_FIELDS = frozenset({"trace_id", "request_label", "agent_name"})
+_METADATA_FIELDS = frozenset(
+    {"trace_id", "request_label", "agent_name", "user_id"}
+)
 _IGNORABLE_REQUEST_FIELDS = frozenset(
     {"background", "store", "service_tier", "include", "user"}
 )
@@ -738,9 +740,17 @@ class CanonicalUsage:
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     def __post_init__(self) -> None:
-        values = (self.input_tokens, self.output_tokens, self.total_tokens)
+        values = (
+            self.input_tokens,
+            self.output_tokens,
+            self.total_tokens,
+            self.cache_creation_input_tokens,
+            self.cache_read_input_tokens,
+        )
         if any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in values):
             raise ManagerError(
                 "canonical_event_invalid",
@@ -753,23 +763,42 @@ class CanonicalUsage:
             )
 
     def to_dict(self) -> dict[str, int]:
-        return {
+        payload = {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
         }
+        if self.cache_creation_input_tokens:
+            payload["cache_creation_input_tokens"] = self.cache_creation_input_tokens
+        if self.cache_read_input_tokens:
+            payload["cache_read_input_tokens"] = self.cache_read_input_tokens
+        return payload
 
     @classmethod
     def from_dict(cls, value: object) -> "CanonicalUsage":
         data = _strict_fields(
             value,
-            frozenset({"input_tokens", "output_tokens", "total_tokens"}),
+            frozenset(
+                {
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cache_creation_input_tokens",
+                    "cache_read_input_tokens",
+                }
+            ),
             "Canonical usage",
         )
         return cls(
             input_tokens=data.get("input_tokens"),  # type: ignore[arg-type]
             output_tokens=data.get("output_tokens"),  # type: ignore[arg-type]
             total_tokens=data.get("total_tokens"),  # type: ignore[arg-type]
+            cache_creation_input_tokens=data.get(
+                "cache_creation_input_tokens", 0
+            ),  # type: ignore[arg-type]
+            cache_read_input_tokens=data.get(
+                "cache_read_input_tokens", 0
+            ),  # type: ignore[arg-type]
         )
 
 
