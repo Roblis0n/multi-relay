@@ -1825,52 +1825,23 @@ def _health(timeout: float = 0.5) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def ensure_bridge(timeout: float = 5.0, *, codex_home: Path | None = None) -> None:
-    """Start the loopback bridge on demand without exposing the API key."""
+_gateway_controller: Any | None = None
 
-    current = _health()
-    if current:
-        service = current.get("service")
-        if service == BRIDGE_SERVICE and current.get("version") == BRIDGE_VERSION:
-            return
-        if service not in {BRIDGE_SERVICE, LEGACY_BRIDGE_SERVICE} or not _stop_bridge_health(current):
-            raise BridgeError("bridge_port_conflict", f"Port {BRIDGE_PORT} is already in use.")
-        stop_deadline = time.monotonic() + min(timeout, 2.0)
-        while time.monotonic() < stop_deadline and _health() is not None:
-            time.sleep(0.05)
-        if _health() is not None:
-            raise BridgeError("bridge_port_conflict", f"Port {BRIDGE_PORT} is already in use.")
-    command = [sys.executable, str(Path(__file__).resolve()), "--serve"]
-    catalog_path = _installed_catalog_path(codex_home)
-    if catalog_path is not None:
-        command.extend(["--catalog", str(catalog_path)])
-    options: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        options["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP
-            | subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NO_WINDOW
-        )
-    else:
-        options["start_new_session"] = True
+
+def ensure_bridge(timeout: float = 5.0, *, codex_home: Path | None = None) -> None:
+    """Compatibility entry point delegated to the unified gateway controller."""
+
+    global _gateway_controller
     try:
-        subprocess.Popen(command, **options)
-    except OSError:
-        raise BridgeError("bridge_start_failed", "The local DeepSeek bridge could not start.", 500) from None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = _health()
-        if current:
-            if current.get("service") == BRIDGE_SERVICE and current.get("version") == BRIDGE_VERSION:
-                return
-            raise BridgeError("bridge_port_conflict", f"Port {BRIDGE_PORT} is already in use.")
-        time.sleep(0.05)
-    raise BridgeError("bridge_start_failed", "The local DeepSeek bridge did not become ready.", 500)
+        if __package__ in {None, ""}:
+            from multi_relay.gateway import GatewayController
+        else:
+            from .gateway import GatewayController
+        controller = GatewayController(codex_home=codex_home)
+        controller.ensure(timeout=timeout)
+        _gateway_controller = controller
+    except ManagerError as error:
+        raise BridgeError(error.code, str(error), getattr(error, "status", 500)) from None
 
 
 def _stop_bridge_health(current: dict[str, Any]) -> bool:
