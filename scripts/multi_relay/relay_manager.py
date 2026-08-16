@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,9 @@ from .catalog import (
     AgentSpec,
     Catalog,
     CredentialRef,
+    ExecutionTarget,
     ProviderSpec,
+    TargetPool,
     default_catalog,
     load_catalog,
     route_agent,
@@ -33,7 +36,7 @@ from .credentials import (
     provider_auth_command,
 )
 from .errors import ManagerError
-from .gateway import GATEWAY_BASE_URL
+from .gateway import GATEWAY_BASE_URL, GatewayController, load_gateway_state
 from .instructions import (
     INSTRUCTIONS_BEGIN,
     INSTRUCTIONS_END,
@@ -52,7 +55,10 @@ from .model_capabilities import ModelSelection
 from .native_test import native_acceptance_report
 from .paths import Paths
 from .provider_api import discover_model
+from .rotation import RotationController, catalog_fingerprint
 from .roles import expected_agent_files
+from .selection import SelectionRequirements
+from .state import RuntimeStateStore
 from .toml_config import (
     LEGACY_PROVIDER_MARKERS,
     PROVIDER_BEGIN,
@@ -87,6 +93,25 @@ _FULL_ACCEPTANCE_CHECKS = {
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _outcome(
+    status: str,
+    *,
+    changed: bool,
+    details: dict[str, Any] | None = None,
+    warnings: Sequence[str] = (),
+    next_actions: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Return the stable secret-free manager result envelope."""
+
+    return {
+        "status": status,
+        "changed": changed,
+        "warnings": list(warnings),
+        "details": details or {},
+        "next_actions": list(next_actions),
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -844,8 +869,16 @@ class RelayManager:
             ),
         }
 
-    def setup(self, preset: str = "hybrid") -> dict[str, Any]:
+    def setup(
+        self,
+        preset: str = "hybrid",
+        *,
+        host: str | None = None,
+        project_path: Path | None = None,
+    ) -> dict[str, Any]:
         with operation_lock(self._lock_path):
+            if host not in {None, "codex", "claude-code", "all"}:
+                raise ManagerError("unknown_host", f"Unsupported host: {host}.")
             if not self.paths.config.is_file():
                 raise ManagerError("config_missing", "Codex config.toml was not found.")
             original_config = self.paths.config.read_text(encoding="utf-8")
@@ -887,6 +920,15 @@ class RelayManager:
                                 "deepseek"
                             )
                     catalog = Catalog.from_dict(payload)
+            if host is not None:
+                payload = catalog.to_dict()
+                hosts = payload["hosts"]
+                assert isinstance(hosts, dict)
+                for host_name in ("codex", "claude-code"):
+                    current = hosts.get(host_name)
+                    if isinstance(current, dict):
+                        current["enabled"] = host == "all" or host == host_name
+                catalog = Catalog.from_dict(payload)
             # Ownership conflicts are local and deterministic; reject them before
             # any provider discovery or compatibility process is started.
             self._assert_role_ownership(
@@ -896,22 +938,45 @@ class RelayManager:
             if previous.get("status") == "disabled":
                 selection = self._preserved_selection(previous, catalog)
                 gate = None
+            elif not catalog.hosts.get("codex") or not catalog.hosts["codex"].enabled:
+                selection = None
+                gate = None
             else:
                 catalog, selection, gate = self._discover_builtin_selection(catalog)
-            return self._install_catalog_locked(
-                catalog,
-                operation="setup",
-                original_config=original_config,
-                working_config=working_config,
-                previous_manifest=previous,
-                manifest_source=source,
-                migration=migration,
-                selection=selection,
-                gate=gate,
-                run_live=selection is not None,
-                catalog_migration=catalog_migration,
-                catalog_migration_source=catalog_migration_source,
-            )
+            claude = None
+            claude_was_configured = False
+            claude_config = catalog.hosts.get("claude-code")
+            if claude_config is not None and claude_config.enabled:
+                from .hosts.claude_code import ClaudeCodeHostAdapter
+
+                claude = ClaudeCodeHostAdapter(self.paths, project_path=project_path)
+                claude_was_configured = claude.status()["status"] != "not_configured"
+                claude.plan(catalog)
+                claude.apply(catalog)
+            try:
+                result = self._install_catalog_locked(
+                    catalog,
+                    operation="setup",
+                    original_config=original_config,
+                    working_config=working_config,
+                    previous_manifest=previous,
+                    manifest_source=source,
+                    migration=migration,
+                    selection=selection,
+                    gate=gate,
+                    run_live=selection is not None,
+                    catalog_migration=catalog_migration,
+                    catalog_migration_source=catalog_migration_source,
+                )
+            except Exception:
+                if claude is not None and not claude_was_configured:
+                    claude.uninstall()
+                raise
+            if host is not None:
+                result["hosts"] = [
+                    name for name, config in catalog.hosts.items() if config.enabled
+                ]
+            return result
 
     def _active_catalog_result(
         self,
@@ -1020,6 +1085,482 @@ class RelayManager:
 
     def list_agents(self) -> list[dict[str, object]]:
         return list(self.catalog()["agents"])  # type: ignore[arg-type]
+
+    def list_credentials(self) -> list[dict[str, object]]:
+        """Return credential presence metadata without key material or fingerprints."""
+
+        catalog = Catalog.from_dict(self.catalog())
+        items: list[dict[str, object]] = []
+        for reference in catalog.credentials:
+            provider = catalog.provider(reference.provider_id)
+            try:
+                present = self._credential_for_reference(provider, reference).exists()
+            except ManagerError:
+                present = False
+            items.append(
+                {
+                    "provider": provider.id,
+                    "credential": reference.id,
+                    "label": reference.label,
+                    "enabled": reference.enabled,
+                    "present": present,
+                }
+            )
+        return items
+
+    def list_targets(self) -> list[dict[str, object]]:
+        return list(self.catalog()["targets"])  # type: ignore[arg-type]
+
+    def list_pools(self) -> list[dict[str, object]]:
+        return list(self.catalog()["pools"])  # type: ignore[arg-type]
+
+    def list_hosts(self) -> list[dict[str, object]]:
+        catalog = Catalog.from_dict(self.catalog())
+        return [
+            {"host": name, **config.to_dict()}
+            for name, config in catalog.hosts.items()
+        ]
+
+    @staticmethod
+    def _mutation_result(
+        result: dict[str, Any],
+        *,
+        operation: str,
+        details: dict[str, Any],
+    ) -> dict[str, Any]:
+        details = {**details, "backup": result.get("backup")}
+        return _outcome(
+            str(result.get("status", "ready")),
+            changed=True,
+            details={"operation": operation, **details},
+        )
+
+    def edit_provider(self, provider_id: str, changes: Mapping[str, object]) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            provider = catalog.provider(provider_id)
+            replacement = ProviderSpec.from_dict({**provider.to_dict(), **dict(changes)})
+            if replacement.id != provider.id:
+                raise ManagerError("provider_id_immutable", "Provider ids cannot be changed.")
+            payload = catalog.to_dict()
+            payload["providers"] = [
+                replacement.to_dict() if item.id == provider.id else item.to_dict()
+                for item in catalog.providers
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("provider-edit", mutate)
+        return self._mutation_result(
+            result,
+            operation="provider-edit",
+            details={"provider": provider_id},
+        )
+
+    def set_provider_enabled(self, provider_id: str, enabled: bool) -> dict[str, Any]:
+        return self.edit_provider(provider_id, {"enabled": enabled})
+
+    def discover_provider_model(self, provider_id: str, requested: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        provider = catalog.provider(provider_id)
+        secret = ""
+        if provider.auth_mode == "vault":
+            reference = self._credential_reference(catalog, provider)
+            secret = self._credential_for_reference(provider, reference).read() or ""
+        model = self._model_discoverer(secret, requested=requested, provider=provider)
+        return _outcome(
+            "ready",
+            changed=False,
+            details={"provider": provider.id, "models": [model]},
+        )
+
+    def test_provider(self, provider_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        provider = catalog.provider(provider_id)
+        present: bool | None = None
+        if provider.auth_mode == "vault":
+            references = [
+                item for item in catalog.credentials if item.provider_id == provider.id and item.enabled
+            ]
+            present = bool(references) and any(
+                self._credential_for_reference(provider, item).exists()
+                for item in references
+            )
+        return _outcome(
+            "ready",
+            changed=False,
+            details={
+                "provider": provider.id,
+                "enabled": provider.enabled,
+                "credential_present": present,
+                "protocol_handshake": "unknown",
+            },
+        )
+
+    def add_credential(
+        self,
+        provider_id: str,
+        credential_id: str,
+        *,
+        label: str | None = None,
+        secret: str | None = None,
+    ) -> dict[str, Any]:
+        added: list[CredentialRef] = []
+
+        def mutate(catalog: Catalog) -> Catalog:
+            provider = catalog.provider(provider_id)
+            if provider.auth_mode != "vault":
+                raise ManagerError(
+                    "credential_not_allowed",
+                    f"Provider {provider.id} does not use vault credentials.",
+                )
+            if any(
+                item.provider_id == provider.id and item.id.casefold() == credential_id.casefold()
+                for item in catalog.credentials
+            ):
+                raise ManagerError(
+                    "duplicate_credential",
+                    f"Credential {credential_id} already exists for {provider.id}.",
+                )
+            reference = CredentialRef.from_dict(
+                {
+                    "id": credential_id,
+                    "provider_id": provider.id,
+                    "vault_target": credential_target(
+                        provider.id,
+                        credential_id,
+                        protocol=provider.protocol,
+                    ),
+                    "enabled": True,
+                    "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "label": label or credential_id,
+                }
+            )
+            added.append(reference)
+            payload = catalog.to_dict()
+            credentials = payload["credentials"]
+            assert isinstance(credentials, list)
+            credentials.append(reference.to_dict())
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("credential-add", mutate)
+        if secret is not None and added:
+            provider = Catalog.from_dict(self.catalog()).provider(provider_id)
+            self._credential_for_reference(provider, added[0]).store(secret)
+        return self._mutation_result(
+            result,
+            operation="credential-add",
+            details={"provider": provider_id, "credential": credential_id},
+        )
+
+    def replace_credential(
+        self,
+        provider_id: str,
+        credential_id: str,
+        secret: str,
+    ) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        provider = catalog.provider(provider_id)
+        reference = catalog.credential(credential_id, provider.id)
+        self._credential_for_reference(provider, reference).store(secret)
+        return _outcome(
+            "ready",
+            changed=True,
+            details={"provider": provider.id, "credential": reference.id, "present": True},
+        )
+
+    def set_credential_enabled(
+        self,
+        provider_id: str,
+        credential_id: str,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            selected = catalog.credential(credential_id, provider_id)
+            payload = catalog.to_dict()
+            payload["credentials"] = [
+                {**item.to_dict(), "enabled": enabled}
+                if item.provider_id == selected.provider_id and item.id == selected.id
+                else item.to_dict()
+                for item in catalog.credentials
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("credential-enable" if enabled else "credential-disable", mutate)
+        return self._mutation_result(
+            result,
+            operation="credential-enable" if enabled else "credential-disable",
+            details={"provider": provider_id, "credential": credential_id},
+        )
+
+    def test_credential(self, provider_id: str, credential_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        provider = catalog.provider(provider_id)
+        reference = catalog.credential(credential_id, provider.id)
+        present = self._credential_for_reference(provider, reference).exists()
+        return _outcome(
+            "ready" if present else "credential_missing",
+            changed=False,
+            details={
+                "provider": provider.id,
+                "credential": reference.id,
+                "enabled": reference.enabled,
+                "present": present,
+            },
+        )
+
+    def remove_credential(self, provider_id: str, credential_id: str) -> dict[str, Any]:
+        removed: list[tuple[ProviderSpec, CredentialRef]] = []
+
+        def mutate(catalog: Catalog) -> Catalog:
+            provider = catalog.provider(provider_id)
+            reference = catalog.credential(credential_id, provider.id)
+            users = [
+                target.id
+                for target in catalog.targets
+                if target.provider_id == provider.id and target.credential_id == reference.id
+            ]
+            if users:
+                raise ManagerError(
+                    "credential_in_use",
+                    f"Credential {reference.id} is still used by execution targets.",
+                    {"provider": provider.id, "credential": reference.id, "targets": users},
+                )
+            removed.append((provider, reference))
+            payload = catalog.to_dict()
+            payload["credentials"] = [
+                item.to_dict()
+                for item in catalog.credentials
+                if not (item.provider_id == provider.id and item.id == reference.id)
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("credential-remove", mutate)
+        if removed:
+            self._credential_for_reference(*removed[0]).remove()
+        return self._mutation_result(
+            result,
+            operation="credential-remove",
+            details={"provider": provider_id, "credential": credential_id},
+        )
+
+    def add_target(self, target: ExecutionTarget | Mapping[str, object]) -> dict[str, Any]:
+        selected = target if isinstance(target, ExecutionTarget) else ExecutionTarget.from_dict(target)
+
+        def mutate(catalog: Catalog) -> Catalog:
+            if any(item.id.casefold() == selected.id.casefold() for item in catalog.targets):
+                raise ManagerError("duplicate_target", f"Target {selected.id} already exists.")
+            payload = catalog.to_dict()
+            targets = payload["targets"]
+            assert isinstance(targets, list)
+            targets.append(selected.to_dict())
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("target-add", mutate)
+        return self._mutation_result(result, operation="target-add", details={"target": selected.id})
+
+    def edit_target(self, target_id: str, changes: Mapping[str, object]) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            target = catalog.target(target_id)
+            replacement = ExecutionTarget.from_dict({**target.to_dict(), **dict(changes)})
+            if replacement.id != target.id:
+                raise ManagerError("target_id_immutable", "Target ids cannot be changed.")
+            payload = catalog.to_dict()
+            payload["targets"] = [
+                replacement.to_dict() if item.id == target.id else item.to_dict()
+                for item in catalog.targets
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("target-edit", mutate)
+        return self._mutation_result(result, operation="target-edit", details={"target": target_id})
+
+    def set_target_enabled(self, target_id: str, enabled: bool) -> dict[str, Any]:
+        return self.edit_target(target_id, {"enabled": enabled})
+
+    def test_target(self, target_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        target = catalog.target(target_id)
+        provider = catalog.provider(target.provider_id)
+        credential_present: bool | None = None
+        if target.credential_id is not None:
+            reference = catalog.credential(target.credential_id, provider.id)
+            credential_present = self._credential_for_reference(provider, reference).exists()
+        return _outcome(
+            "ready",
+            changed=False,
+            details={
+                "target": target.id,
+                "authentication": "present" if credential_present else (
+                    "missing" if credential_present is False else "not_required"
+                ),
+                "model_available": "unknown",
+                "protocol_handshake": "unknown",
+                "capabilities": {name: "unknown" for name in sorted(target.capabilities)},
+            },
+        )
+
+    def remove_target(self, target_id: str) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            target = catalog.target(target_id)
+            users = [pool.id for pool in catalog.pools if target.id in pool.targets]
+            if users:
+                raise ManagerError(
+                    "target_in_use",
+                    f"Target {target.id} is still used by target pools.",
+                    {"target": target.id, "pools": users},
+                )
+            payload = catalog.to_dict()
+            payload["targets"] = [item.to_dict() for item in catalog.targets if item.id != target.id]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("target-remove", mutate)
+        return self._mutation_result(result, operation="target-remove", details={"target": target_id})
+
+    def add_pool(self, pool: TargetPool | Mapping[str, object]) -> dict[str, Any]:
+        selected = pool if isinstance(pool, TargetPool) else TargetPool.from_dict(pool)
+
+        def mutate(catalog: Catalog) -> Catalog:
+            if any(item.id.casefold() == selected.id.casefold() for item in catalog.pools):
+                raise ManagerError("duplicate_pool", f"Pool {selected.id} already exists.")
+            disabled = [target_id for target_id in selected.targets if not catalog.target(target_id).enabled]
+            if disabled:
+                raise ManagerError(
+                    "target_disabled",
+                    "Pools cannot include disabled execution targets.",
+                    {"targets": disabled},
+                )
+            payload = catalog.to_dict()
+            pools = payload["pools"]
+            assert isinstance(pools, list)
+            pools.append(selected.to_dict())
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("pool-add", mutate)
+        return self._mutation_result(result, operation="pool-add", details={"pool": selected.id})
+
+    def edit_pool(self, pool_id: str, changes: Mapping[str, object]) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            pool = catalog.pool(pool_id)
+            replacement = TargetPool.from_dict({**pool.to_dict(), **dict(changes)})
+            if replacement.id != pool.id:
+                raise ManagerError("pool_id_immutable", "Pool ids cannot be changed.")
+            disabled = [target_id for target_id in replacement.targets if not catalog.target(target_id).enabled]
+            if disabled:
+                raise ManagerError(
+                    "target_disabled",
+                    "Pools cannot include disabled execution targets.",
+                    {"targets": disabled},
+                )
+            payload = catalog.to_dict()
+            payload["pools"] = [
+                replacement.to_dict() if item.id == pool.id else item.to_dict()
+                for item in catalog.pools
+            ]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("pool-edit", mutate)
+        return self._mutation_result(result, operation="pool-edit", details={"pool": pool_id})
+
+    def set_pool_order(self, pool_id: str, target_ids: Sequence[str]) -> dict[str, Any]:
+        if len(target_ids) != len(set(target_ids)):
+            raise ManagerError("duplicate_target", "Pool order contains duplicate targets.")
+        if not target_ids:
+            raise ManagerError("unknown_target", "Pool order requires at least one target.")
+        return self.edit_pool(pool_id, {"targets": list(target_ids)})
+
+    def set_pool_strategy(
+        self,
+        pool_id: str,
+        strategy: str,
+        *,
+        duration_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        return self.edit_pool(
+            pool_id,
+            {
+                "strategy": strategy,
+                "duration_seconds": duration_seconds if strategy == "timed" else None,
+            },
+        )
+
+    def _rotation(self, catalog: Catalog) -> RotationController:
+        store = RuntimeStateStore(
+            self.paths.runtime_state,
+            lock_path=self.paths.runtime_state_lock,
+        )
+        return RotationController(
+            catalog,
+            store,
+            credential_available=lambda reference: self._credential_for_reference(
+                catalog.provider(reference.provider_id),
+                reference,
+            ).exists(),
+        )
+
+    def rotate_pool(self, pool_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        pool = catalog.pool(pool_id)
+        controller = self._rotation(catalog)
+        state = controller.store.load(controller.catalog_hash)
+        result = controller.rotate_pool(
+            pool.id,
+            expected_generation=state.generation,
+            requirements=SelectionRequirements(
+                host=pool.host_compatibility[0],
+                required_capabilities=pool.required_capabilities,
+            ),
+        )
+        return _outcome(
+            "ready" if result.selected_target_id else "no_eligible_target",
+            changed=result.changed,
+            details=asdict(result),
+        )
+
+    def reset_pool(self, pool_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        state = self._rotation(catalog).reset_pool(pool_id)
+        return _outcome(
+            "ready",
+            changed=True,
+            details={"pool": pool_id, "generation": state.generation},
+        )
+
+    def pool_status(self, pool_id: str) -> dict[str, Any]:
+        catalog = Catalog.from_dict(self.catalog())
+        catalog.pool(pool_id)
+        store = RuntimeStateStore(self.paths.runtime_state, lock_path=self.paths.runtime_state_lock)
+        state = store.load(catalog_fingerprint(catalog))
+        pool_state = state.pools.get(pool_id)
+        return _outcome(
+            "ready",
+            changed=False,
+            details={
+                "pool": pool_id,
+                "generation": state.generation,
+                "runtime": pool_state.to_dict() if pool_state is not None else None,
+            },
+        )
+
+    def remove_pool(self, pool_id: str) -> dict[str, Any]:
+        def mutate(catalog: Catalog) -> Catalog:
+            pool = catalog.pool(pool_id)
+            agents = [
+                agent.name
+                for agent in catalog.agents
+                if agent.pool_id == pool.id or agent.fallback_pool_id == pool.id
+            ]
+            hosts = [host.host for host in catalog.hosts.values() if host.default_pool == pool.id]
+            if agents or hosts:
+                raise ManagerError(
+                    "pool_in_use",
+                    f"Pool {pool.id} is still referenced.",
+                    {"pool": pool.id, "agents": agents, "hosts": hosts},
+                )
+            payload = catalog.to_dict()
+            payload["pools"] = [item.to_dict() for item in catalog.pools if item.id != pool.id]
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("pool-remove", mutate)
+        return self._mutation_result(result, operation="pool-remove", details={"pool": pool_id})
 
     def _mutate_catalog(
         self,
@@ -1375,6 +1916,146 @@ class RelayManager:
 
         return self._mutate_catalog("agent-remove", mutate)
 
+    def configure_host(
+        self,
+        host_name: str,
+        *,
+        enabled: bool | None = None,
+        scope: str | None = None,
+        default_pool: str | None = None,
+    ) -> dict[str, Any]:
+        if host_name not in {"codex", "claude-code"}:
+            raise ManagerError("unknown_host", f"Unsupported host: {host_name}.")
+
+        def mutate(catalog: Catalog) -> Catalog:
+            current = catalog.hosts.get(host_name)
+            if current is None:
+                raise ManagerError("unknown_host", f"Host {host_name} is not configured.")
+            replacement = current.to_dict()
+            if enabled is not None:
+                replacement["enabled"] = enabled
+            if scope is not None:
+                replacement["scope"] = scope
+            if default_pool is not None:
+                replacement["default_pool"] = default_pool
+            payload = catalog.to_dict()
+            hosts = payload["hosts"]
+            assert isinstance(hosts, dict)
+            hosts[host_name] = replacement
+            return Catalog.from_dict(payload)
+
+        result = self._mutate_catalog("host-configure", mutate)
+        return self._mutation_result(
+            result,
+            operation="host-configure",
+            details={"host": host_name},
+        )
+
+    def apply_host(self, host_name: str, *, project_path: Path | None = None) -> dict[str, Any]:
+        if host_name == "codex":
+            result = self.apply()
+            return _outcome(
+                str(result.get("status", "ready")),
+                changed=True,
+                details={"host": host_name, "backup": result.get("backup")},
+            )
+        if host_name == "claude-code":
+            from .hosts.claude_code import ClaudeCodeHostAdapter
+
+            catalog = Catalog.from_dict(self.catalog())
+            return ClaudeCodeHostAdapter(self.paths, project_path=project_path).apply(catalog)
+        raise ManagerError("unknown_host", f"Unsupported host: {host_name}.")
+
+    def host_status(self, host_name: str, *, project_path: Path | None = None) -> dict[str, Any]:
+        if host_name == "codex":
+            result = self.status()
+            return _outcome(
+                str(result.get("status", "partial")),
+                changed=False,
+                details={"host": host_name, "checks": result.get("checks", {})},
+            )
+        if host_name == "claude-code":
+            from .hosts.claude_code import ClaudeCodeHostAdapter
+
+            return ClaudeCodeHostAdapter(self.paths, project_path=project_path).status()
+        raise ManagerError("unknown_host", f"Unsupported host: {host_name}.")
+
+    def enable_host(self, host_name: str, *, project_path: Path | None = None) -> dict[str, Any]:
+        self.configure_host(host_name, enabled=True)
+        return self.apply_host(host_name, project_path=project_path)
+
+    def disable_host(self, host_name: str, *, project_path: Path | None = None) -> dict[str, Any]:
+        if host_name == "claude-code":
+            from .hosts.claude_code import ClaudeCodeHostAdapter
+
+            adapter = ClaudeCodeHostAdapter(self.paths, project_path=project_path)
+            result = adapter.disable()
+            self.configure_host(host_name, enabled=False)
+            return result
+        if host_name == "codex":
+            self.configure_host(host_name, enabled=False)
+            return self.apply_host(host_name)
+        raise ManagerError("unknown_host", f"Unsupported host: {host_name}.")
+
+    def uninstall_host(
+        self,
+        host_name: str,
+        *,
+        project_path: Path | None = None,
+        remove_credentials: bool = False,
+    ) -> dict[str, Any]:
+        if host_name == "codex":
+            return self.uninstall(remove_credential=remove_credentials)
+        if host_name == "claude-code":
+            from .hosts.claude_code import ClaudeCodeHostAdapter
+
+            return ClaudeCodeHostAdapter(self.paths, project_path=project_path).uninstall()
+        if host_name == "all":
+            from .hosts.claude_code import ClaudeCodeHostAdapter
+
+            claude = ClaudeCodeHostAdapter(self.paths, project_path=project_path).uninstall()
+            codex = self.uninstall(remove_credential=remove_credentials)
+            return _outcome(
+                "uninstalled",
+                changed=True,
+                details={"codex": codex, "claude-code": claude},
+            )
+        raise ManagerError("unknown_host", f"Unsupported host: {host_name}.")
+
+    def gateway_start(self, *, controller: GatewayController | None = None) -> dict[str, Any]:
+        gateway = controller or GatewayController(codex_home=self.paths.home)
+        state = gateway.ensure()
+        return _outcome(
+            "running",
+            changed=True,
+            details={"pid": state.pid, "port": state.port, "generation": state.generation},
+        )
+
+    def gateway_status(self) -> dict[str, Any]:
+        state = load_gateway_state(self.paths.gateway_state)
+        if state is None:
+            return _outcome("stopped", changed=False)
+        alive = True
+        try:
+            os.kill(state.pid, 0)
+        except (OSError, ValueError):
+            alive = False
+        return _outcome(
+            "running" if alive else "stale",
+            changed=False,
+            details={"pid": state.pid, "port": state.port, "generation": state.generation},
+            next_actions=(["gateway start"] if not alive else []),
+        )
+
+    def gateway_stop(self, *, controller: GatewayController | None = None) -> dict[str, Any]:
+        gateway = controller or GatewayController(codex_home=self.paths.home)
+        stopped = gateway.stop()
+        return _outcome(
+            "stopped" if stopped else "not_stopped",
+            changed=stopped,
+            next_actions=([] if stopped else ["Stop the launcher-owned gateway process."]),
+        )
+
     def route(
         self,
         capabilities: set[str] | frozenset[str],
@@ -1497,7 +2178,30 @@ class RelayManager:
             "checks": checks,
         }
 
-    def test(self) -> dict[str, Any]:
+    def test(self, host: str = "codex") -> dict[str, Any]:
+        if host == "all":
+            checks: dict[str, Any] = {}
+            for name in ("codex", "claude-code"):
+                try:
+                    checks[name] = self.test(name)
+                except ManagerError as exc:
+                    checks[name] = {"status": exc.code, "message": str(exc)}
+            ready = all(item.get("status") == "ready" for item in checks.values())
+            return _outcome(
+                "ready" if ready else "partial",
+                changed=False,
+                details={"hosts": checks},
+            )
+        if host == "claude-code":
+            result = self.host_status(host)
+            ready = result.get("status") == "enabled"
+            return _outcome(
+                "ready" if ready else str(result.get("status", "partial")),
+                changed=False,
+                details={"host": host, "host_status": result},
+            )
+        if host != "codex":
+            raise ManagerError("unknown_host", f"Unsupported host: {host}.")
         manifest, source = self._read_manifest()
         if not manifest:
             raise ManagerError("not_configured", "Multi Relay is not enabled.")

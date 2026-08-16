@@ -43,6 +43,59 @@ class InstallPlan:
 
 
 @dataclass(frozen=True)
+class ChangePlan:
+    """Host-neutral validated changes that can be merged before one commit."""
+
+    files: Mapping[Path, bytes] = field(default_factory=dict)
+    removals: tuple[Path, ...] = ()
+    warnings: tuple[str, ...] = ()
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def combine(cls, plans: Iterable["ChangePlan"]) -> "ChangePlan":
+        files: dict[Path, bytes] = {}
+        removals: list[Path] = []
+        warnings: list[str] = []
+        details: dict[str, Any] = {}
+        for plan in plans:
+            overlap = set(files).intersection(plan.files)
+            conflicting = [
+                path for path in overlap if files[path] != plan.files[path]
+            ]
+            if conflicting or set(plan.files).intersection(removals) or set(plan.removals).intersection(files):
+                raise ManagerError(
+                    "invalid_plan",
+                    "Combined change plans contain conflicting host writes.",
+                    {"paths": [str(path) for path in sorted(conflicting, key=str)]},
+                )
+            files.update(plan.files)
+            removals.extend(plan.removals)
+            warnings.extend(plan.warnings)
+            details.update(plan.details)
+        return cls(
+            files=files,
+            removals=tuple(dict.fromkeys(removals)),
+            warnings=tuple(warnings),
+            details=details,
+        )
+
+    def to_install_plan(
+        self,
+        *,
+        manifest: dict[str, Any] | None,
+        backup_dir: Path,
+        preconditions: Mapping[Path, str] | None = None,
+    ) -> InstallPlan:
+        return InstallPlan(
+            files=dict(self.files),
+            removals=self.removals,
+            manifest=manifest,
+            backup_dir=backup_dir,
+            preconditions=dict(preconditions or {}),
+        )
+
+
+@dataclass(frozen=True)
 class FileSnapshot:
     path: Path
     existed: bool

@@ -174,6 +174,9 @@ def expected_agent_files(
     """Return the complete deterministic legacy or catalog agent file set."""
 
     if isinstance(selection, Catalog):
+        host = selection.hosts.get("codex")
+        if host is None or not host.enabled:
+            return {}
         return {
             agents_dir / f"{agent.name}.toml": render_agent(
                 agent, catalog=selection

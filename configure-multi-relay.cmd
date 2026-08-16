@@ -1,6 +1,5 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-title Configure Codex Multi Relay
 
 if defined MULTI_RELAY_MANAGER (
   set "MANAGER=%MULTI_RELAY_MANAGER%"
@@ -11,50 +10,27 @@ if defined MULTI_RELAY_MANAGER (
 )
 
 if not exist "%MANAGER%" (
-  echo Codex Multi Relay setup program was not found:
-  echo %MANAGER%
-  set "SETUP_EXIT=3"
-  goto finish
+  echo Multi Relay CLI was not found: "%MANAGER%" 1>&2
+  exit /b 3
 )
 
-set "PYTHON_EXE="
-if defined MULTI_RELAY_PYTHON set "PYTHON_EXE=%MULTI_RELAY_PYTHON%"
+set "PYTHON_EXE=%MULTI_RELAY_PYTHON%"
 if not defined PYTHON_EXE if defined DEEPSEEK_PYTHON set "PYTHON_EXE=%DEEPSEEK_PYTHON%"
 if not defined PYTHON_EXE for /f "delims=" %%P in ('where python.exe 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
 if not defined PYTHON_EXE for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
-
 if not defined PYTHON_EXE (
-  echo A working Python was not found. Install Python 3.11 or newer.
-  set "SETUP_EXIT=4"
-  goto finish
+  echo Python 3.11 or newer is required. 1>&2
+  exit /b 4
 )
 
-"%PYTHON_EXE%" --version >nul 2>&1
-if errorlevel 1 (
-  echo The selected Python cannot run: %PYTHON_EXE%
-  set "SETUP_EXIT=4"
-  goto finish
-)
+if not defined MULTI_RELAY_NO_PAUSE if defined DEEPSEEK_NO_PAUSE set "MULTI_RELAY_NO_PAUSE=%DEEPSEEK_NO_PAUSE%"
 
-if defined CODEX_HOME (
-  set "TARGET_CODEX_HOME=%CODEX_HOME%"
-) else (
-  set "TARGET_CODEX_HOME=%USERPROFILE%\.codex"
-)
+if "%~1"=="" goto default_setup
+"%PYTHON_EXE%" "%MANAGER%" %*
+exit /b %ERRORLEVEL%
 
-echo DEFAULT HYBRID SETUP USES DEEPSEEK WORKERS AND A NATIVE CODEX REVIEWER.
-echo PASTE YOUR DEEPSEEK API KEY ON THE NEXT LINE.
-echo Nothing will appear while typing. Paste the key, then press Enter.
-echo.
+:default_setup
+if defined CODEX_HOME set "TARGET_CODEX_HOME=%CODEX_HOME%"
+if not defined TARGET_CODEX_HOME set "TARGET_CODEX_HOME=%USERPROFILE%\.codex"
 "%PYTHON_EXE%" "%MANAGER%" setup --codex-home "%TARGET_CODEX_HOME%"
-set "SETUP_EXIT=%ERRORLEVEL%"
-
-:finish
-echo.
-if "%SETUP_EXIT%"=="0" (
-  echo Setup and verification completed. Restart Codex before use.
-) else (
-  echo Setup did not complete. Keep the error message shown above.
-)
-if not defined MULTI_RELAY_NO_PAUSE if not defined DEEPSEEK_NO_PAUSE pause
-exit /b %SETUP_EXIT%
+exit /b %ERRORLEVEL%

@@ -121,6 +121,7 @@ def launch_claude_code(
     executable: str | None = None,
     codex_home: Path | None = None,
     catalog_path: Path | None = None,
+    project_path: Path | None = None,
     keep_gateway: bool = False,
     environ: Mapping[str, str] | None = None,
     controller: Any | None = None,
@@ -129,6 +130,7 @@ def launch_claude_code(
 ) -> int:
     """Start Claude Code through the Anthropic gateway and return its exit code."""
 
+    del project_path  # Reserved for project-scoped launcher configuration.
     if pool is not None and not _IDENTIFIER.fullmatch(pool):
         raise ManagerError("unknown_pool", "Claude Code pool id is invalid.")
     binary = find_claude_code(executable, environ=environ)

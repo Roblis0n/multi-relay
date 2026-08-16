@@ -21,6 +21,7 @@ from multi_relay.model_capabilities import ModelSelection  # noqa: E402
 from multi_relay.native_test import (  # noqa: E402
     NativeEvidence,
     _prompt,
+    aggregate_host_checks,
     run_native_acceptance,
     verify_native_evidence,
 )
@@ -83,6 +84,17 @@ class NativeEvidenceTests(unittest.TestCase):
             "model": "gpt-5.6-sol",
             "reasoning_effort": "max",
         }
+
+    def test_host_check_aggregation_preserves_each_host_result(self) -> None:
+        combined = aggregate_host_checks(
+            {
+                "codex": {"status": "ready"},
+                "claude-code": {"status": "partial"},
+            }
+        )
+
+        self.assertEqual(combined["status"], "partial")
+        self.assertEqual(combined["details"]["hosts"]["codex"]["status"], "ready")
 
     def test_complete_evidence_passes(self) -> None:
         verify_native_evidence(valid_evidence(), self.selection, self.parent)

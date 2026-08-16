@@ -17,6 +17,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from multi_relay import ManagerError  # noqa: E402
 import multi_relay.transaction as transaction_module  # noqa: E402
 from multi_relay.transaction import (  # noqa: E402
+    ChangePlan,
     InstallPlan,
     atomic_write,
     execute_install_plan,
@@ -26,6 +27,27 @@ from multi_relay.transaction import (  # noqa: E402
 
 
 class TransactionTests(unittest.TestCase):
+    def test_change_plans_merge_disjoint_hosts_and_reject_conflicting_writes(self) -> None:
+        root = Path("C:/temporary-plan")
+        codex = ChangePlan(files={root / "config.toml": b"codex\n"})
+        claude = ChangePlan(
+            files={root / ".claude" / "agents" / "worker.md": b"claude\n"},
+            warnings=("warning",),
+        )
+
+        combined = ChangePlan.combine((codex, claude))
+
+        self.assertEqual(len(combined.files), 2)
+        self.assertEqual(combined.warnings, ("warning",))
+        with self.assertRaises(ManagerError) as raised:
+            ChangePlan.combine(
+                (
+                    codex,
+                    ChangePlan(files={root / "config.toml": b"different\n"}),
+                )
+            )
+        self.assertEqual(raised.exception.code, "invalid_plan")
+
     def test_precondition_change_after_backup_aborts_before_any_install_write(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

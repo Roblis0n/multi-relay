@@ -508,3 +508,24 @@ def native_acceptance_report(
         child_metadata_passed=True,
         parent_unchanged=True,
     )
+
+
+def aggregate_host_checks(checks: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate host-specific acceptance without hiding partial or skipped hosts."""
+
+    supported = {"codex", "claude-code"}
+    unknown = sorted(set(checks) - supported)
+    if unknown:
+        raise ManagerError(
+            "unknown_host",
+            f"Unsupported acceptance hosts: {', '.join(unknown)}.",
+            {"hosts": unknown},
+        )
+    ready = bool(checks) and all(value.get("status") == "ready" for value in checks.values())
+    return {
+        "status": "ready" if ready else "partial",
+        "changed": False,
+        "warnings": [],
+        "details": {"hosts": checks},
+        "next_actions": [],
+    }

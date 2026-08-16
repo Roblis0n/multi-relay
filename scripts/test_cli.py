@@ -123,6 +123,91 @@ class FakeManager:
 
 
 class CliTests(unittest.TestCase):
+    def test_parser_covers_complete_management_surface(self) -> None:
+        parser = build_parser()
+        samples = (
+            ["setup", "--host", "all"],
+            ["test", "--host", "claude-code"],
+            ["enable", "--host", "codex"],
+            ["disable", "--host", "all"],
+            ["provider", "edit", "vendor", "--name", "Vendor 2"],
+            ["provider", "discover-models", "vendor", "--model", "m1"],
+            ["provider", "test", "vendor"],
+            ["provider", "enable", "vendor"],
+            ["provider", "disable", "vendor"],
+            ["credential", "list"],
+            ["credential", "add", "--provider", "vendor", "--id", "backup"],
+            ["credential", "replace", "--provider", "vendor", "--id", "backup"],
+            ["credential", "enable", "--provider", "vendor", "--id", "backup"],
+            ["credential", "disable", "--provider", "vendor", "--id", "backup"],
+            ["credential", "test", "--provider", "vendor", "--id", "backup"],
+            ["credential", "remove", "--provider", "vendor", "--id", "backup"],
+            ["host", "list"],
+            ["host", "apply", "codex"],
+            ["host", "status", "claude-code"],
+            ["gateway", "start"],
+            ["gateway", "status"],
+            ["gateway", "stop"],
+            ["launch", "claude-code", "--pool", "general", "--", "--version"],
+            ["uninstall", "--host", "all", "--remove-credentials"],
+        )
+        for argv in samples:
+            with self.subTest(argv=argv):
+                self.assertIsNotNone(parser.parse_args(argv).command)
+
+    def test_credential_add_rejects_plaintext_key_option(self) -> None:
+        parser = build_parser()
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(
+                [
+                    "credential",
+                    "add",
+                    "--provider",
+                    "vendor",
+                    "--id",
+                    "backup",
+                    "--key",
+                    "secret",
+                ]
+            )
+
+    def test_json_output_uses_stable_envelope_and_never_echoes_prompted_secret(self) -> None:
+        class CredentialManager:
+            def add_credential(self, provider, credential, **options):
+                self.received = options["secret"]
+                return {
+                    "status": "ready",
+                    "changed": True,
+                    "warnings": [],
+                    "details": {"provider": provider, "credential": credential},
+                    "next_actions": [],
+                }
+
+        manager = CredentialManager()
+        stdout = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            code = main(
+                [
+                    "credential",
+                    "add",
+                    "--provider",
+                    "vendor",
+                    "--id",
+                    "backup",
+                    "--json",
+                ],
+                manager_factory=lambda args: manager,
+                prompt_fn=lambda prompt: "top-secret-value",
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(
+            set(payload),
+            {"status", "changed", "warnings", "details", "next_actions"},
+        )
+        self.assertEqual(manager.received, "top-secret-value")
+        self.assertNotIn("top-secret-value", stdout.getvalue())
+
     def test_find_codex_prefers_desktop_sandbox_runtime_in_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
