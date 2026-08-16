@@ -61,6 +61,7 @@ from .transaction import atomic_write
 
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 42137
+GATEWAY_BASE_URL = f"http://{GATEWAY_HOST}:{GATEWAY_PORT}/v1"
 GATEWAY_SERVICE = "multi-relay-gateway"
 GATEWAY_VERSION = 1
 MAX_REQUEST_BYTES = 1024 * 1024
@@ -1515,6 +1516,7 @@ __all__ = [
     "AttemptResponse",
     "CancellationToken",
     "GatewayApplication",
+    "GATEWAY_BASE_URL",
     "GatewayCancelled",
     "GatewayController",
     "GatewayError",

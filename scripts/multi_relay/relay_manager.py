@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .bridge import BRIDGE_BASE_URL, stop_bridge
+from .bridge import stop_bridge
 from .catalog import (
     AgentSpec,
     Catalog,
@@ -28,10 +28,12 @@ from .credentials import (
     CredentialStore,
     credential_store,
     credential_target,
+    gateway_auth_command,
     legacy_credential_target,
     provider_auth_command,
 )
 from .errors import ManagerError
+from .gateway import GATEWAY_BASE_URL
 from .instructions import (
     INSTRUCTIONS_BEGIN,
     INSTRUCTIONS_END,
@@ -483,6 +485,8 @@ class RelayManager:
 
     def _auth_factory(self, catalog: Catalog) -> Callable[[str, bool], list[str]]:
         def command(provider_id: str, start_bridge: bool) -> list[str]:
+            if provider_id == "local-gateway":
+                return gateway_auth_command(self.paths.home)
             provider = catalog.provider(provider_id)
             return self._provider_auth_command(catalog, provider, start_bridge)
 
@@ -1439,20 +1443,21 @@ class RelayManager:
         try:
             config = tomllib.loads(self.paths.config.read_text(encoding="utf-8"))
             providers = config.get("model_providers") or {}
-            for provider in catalog.providers:
-                if not provider.enabled or provider.protocol == "codex-native":
-                    continue
-                entry = providers.get(provider.id) if isinstance(providers, dict) else None
-                expected_url = (
-                    provider.base_url
-                    if provider.protocol == "responses-compatible"
-                    else f"{BRIDGE_BASE_URL}/providers/{provider.id}"
-                )
-                checks[f"provider_{provider.id}"] = (
+            has_http_target = any(
+                target.enabled
+                and "codex" in target.host_compatibility
+                and catalog.provider(target.provider_id).protocol != "codex-native"
+                for target in catalog.targets
+            )
+            entry = providers.get("multi-relay") if isinstance(providers, dict) else None
+            checks["provider_multi-relay"] = (
+                (not has_http_target and entry is None)
+                or (
                     isinstance(entry, dict)
                     and entry.get("wire_api") == "responses"
-                    and entry.get("base_url") == expected_url
+                    and entry.get("base_url") == GATEWAY_BASE_URL
                 )
+            )
             agents_table = config.get("agents") or {}
             checks["agents_enabled"] = agents_table.get("enabled") is True
             limit = agents_table.get("max_concurrent_threads_per_session")

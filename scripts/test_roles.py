@@ -100,7 +100,7 @@ class RoleRenderingTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "invalid_role")
 
     def test_catalog_agents_render_provider_mcp_skill_and_sandbox_overrides(self) -> None:
-        payload = default_catalog("native").to_dict()
+        payload = default_catalog().to_dict()
         payload["targets"][0].update(
             {
                 "model": "gpt-example",
@@ -114,6 +114,13 @@ class RoleRenderingTests(unittest.TestCase):
                 "reasoning_efforts": ["high"],
             }
         )
+        payload["providers"][0]["capabilities"] = [
+            "text",
+            "vision",
+            "audio",
+            "tool_calling",
+            "server_web_search",
+        ]
         payload["pools"][0]["required_capabilities"] = [
             "text",
             "tool_calling",
@@ -141,9 +148,9 @@ class RoleRenderingTests(unittest.TestCase):
 
         parsed = tomllib.loads(render_agent(catalog.agents[0], catalog=catalog))
 
-        self.assertEqual(parsed["name"], "reviewer")
-        self.assertEqual(parsed["model"], "gpt-example")
-        self.assertNotIn("model_provider", parsed)
+        self.assertEqual(parsed["name"], "default")
+        self.assertEqual(parsed["model"], "multi-relay-agent-default")
+        self.assertEqual(parsed["model_provider"], "multi-relay")
         self.assertEqual(parsed["model_reasoning_effort"], "high")
         self.assertEqual(parsed["sandbox_mode"], "read-only")
         self.assertEqual(
@@ -159,6 +166,15 @@ class RoleRenderingTests(unittest.TestCase):
             parsed["skills"]["config"],
             [{"path": "C:/skills/docs/SKILL.md", "enabled": False}],
         )
+
+    def test_native_codex_agent_uses_host_model_without_gateway_alias(self) -> None:
+        catalog = default_catalog()
+        reviewer = catalog.agent("reviewer")
+
+        parsed = tomllib.loads(render_agent(reviewer, catalog=catalog))
+
+        self.assertNotIn("model", parsed)
+        self.assertNotIn("model_provider", parsed)
 
     def test_expected_catalog_files_include_custom_agent_names(self) -> None:
         catalog = default_catalog()

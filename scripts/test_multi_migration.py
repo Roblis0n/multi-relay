@@ -453,13 +453,11 @@ class MultiRelayMigrationTests(unittest.TestCase):
             manager.setup()
             catalog = load_catalog(paths.catalog)
             parsed = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
-            auth_args = parsed["model_providers"]["deepseek"]["auth"]["args"]
+            auth_args = parsed["model_providers"]["multi-relay"]["auth"]["args"]
 
             self.assertEqual({item.name for item in catalog.agents}, {"default", "worker", "explorer", "reviewer"})
-            self.assertEqual(
-                auth_args[auth_args.index("--vault-target") + 1],
-                "codex-deepseek-api-key",
-            )
+            self.assertIn("--gateway", auth_args)
+            self.assertNotIn("--vault-target", auth_args)
             self.assertFalse(paths.relay_manifest.exists())
             self.assertEqual(json.loads(paths.manifest.read_text(encoding="utf-8"))["schema_version"], 5)
 
@@ -600,11 +598,12 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
             self.assertEqual(parsed["model"], "gpt-parent")
             self.assertEqual(parsed["model_provider"], "openai")
+            self.assertEqual(set(parsed["model_providers"]), {"multi-relay"})
             self.assertEqual(
-                parsed["model_providers"]["vendor"]["base_url"],
-                "https://api.vendor.test/v1",
+                parsed["model_providers"]["multi-relay"]["base_url"],
+                "http://127.0.0.1:42137/v1",
             )
-            self.assertIsNone(parsed["model_providers"]["vendor"].get("auth"))
+            self.assertIn("auth", parsed["model_providers"]["multi-relay"])
             self.assertEqual(catalog.agent("vendor-worker").model, "vendor-model")
             self.assertTrue(agent_file.is_file())
 

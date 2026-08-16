@@ -25,6 +25,7 @@ from multi_relay.credentials import (  # noqa: E402
     WindowsCredentialStore,
     credential_store,
     credential_target,
+    gateway_auth_command,
     prompt_and_store,
     provider_auth_command,
 )
@@ -228,6 +229,13 @@ class CredentialTests(unittest.TestCase):
 
         self.assertEqual(command[-2:], ["--codex-home", str(codex_home)])
 
+    def test_gateway_auth_command_contains_only_local_gateway_selector(self) -> None:
+        command = gateway_auth_command(Path("C:/Users/test/.codex"))
+
+        self.assertIn("--gateway", command)
+        self.assertNotIn("--provider", command)
+        self.assertFalse(any(part.startswith("sk-") for part in command))
+
     def test_custom_provider_requires_an_explicit_protocol(self) -> None:
         for operation in (
             lambda: provider_auth_command("vendor"),
@@ -333,6 +341,28 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(code, 4)
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
+
+    def test_credential_helper_gateway_mode_reads_only_local_token(self) -> None:
+        local_store = mock.Mock()
+        local_store.read.return_value = "short-local-token"
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(
+                credential_helper,
+                "local_gateway_credential_store",
+                return_value=local_store,
+            ),
+            mock.patch.object(credential_helper, "credential_store") as upstream,
+            mock.patch.object(credential_helper, "ensure_bridge") as ensure,
+            redirect_stdout(stdout),
+        ):
+            code = credential_helper.main(["--gateway"])
+
+        self.assertEqual(code, 0)
+        ensure.assert_called_once_with()
+        upstream.assert_not_called()
+        self.assertEqual(stdout.getvalue(), "short-local-token")
 
     def test_local_gateway_locator_is_separate_from_upstream_credentials(self) -> None:
         locator = VaultLocator(LOCAL_GATEWAY_PROVIDER_ID, LOCAL_GATEWAY_CREDENTIAL_ID)

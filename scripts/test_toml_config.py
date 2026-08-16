@@ -11,7 +11,8 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
-from multi_relay.catalog import Catalog  # noqa: E402
+from multi_relay.catalog import Catalog, default_catalog  # noqa: E402
+from multi_relay.gateway import GATEWAY_BASE_URL  # noqa: E402
 from multi_relay.toml_config import (  # noqa: E402
     apply_codex_config,
     build_provider_blocks,
@@ -97,31 +98,30 @@ class TomlConfigTests(unittest.TestCase):
             }
         )
 
-    def test_catalog_provider_blocks_use_direct_and_provider_addressed_routes(self) -> None:
+    def test_catalog_provider_blocks_expose_one_stable_gateway_route(self) -> None:
         seen: list[tuple[str, bool]] = []
 
         def auth_factory(provider_id: str, start_bridge: bool) -> list[str]:
             seen.append((provider_id, start_bridge))
             return ["python", "helper.py", "--provider", provider_id]
 
-        rendered = build_provider_blocks(self.multi_catalog(), auth_factory)
+        rendered = build_provider_blocks(default_catalog(), auth_factory)
         parsed = tomllib.loads(rendered)
 
-        self.assertNotIn("codex", parsed.get("model_providers", {}))
+        self.assertEqual(set(parsed["model_providers"]), {"multi-relay"})
         self.assertEqual(
-            parsed["model_providers"]["responses"]["base_url"],
-            "https://responses.example.test/v1",
-        )
-        self.assertNotIn("auth", parsed["model_providers"]["responses"])
-        self.assertEqual(
-            parsed["model_providers"]["chat"]["base_url"],
-            "http://127.0.0.1:42137/v1/providers/chat",
+            parsed["model_providers"]["multi-relay"]["base_url"],
+            GATEWAY_BASE_URL,
         )
         self.assertEqual(
-            parsed["model_providers"]["deepseek"]["base_url"],
-            "http://127.0.0.1:42137/v1/providers/deepseek",
+            parsed["model_providers"]["multi-relay"]["wire_api"],
+            "responses",
         )
-        self.assertEqual(seen, [("chat", True), ("deepseek", True)])
+        self.assertEqual(
+            parsed["model_providers"]["multi-relay"]["auth"]["args"],
+            ["helper.py", "--provider", "local-gateway"],
+        )
+        self.assertEqual(seen, [("local-gateway", True)])
         self.assertEqual(rendered.count("# BEGIN CODEX-MULTI-RELAY PROVIDERS"), 1)
 
     def test_responses_vault_auth_uses_helper_without_starting_bridge(self) -> None:
@@ -196,7 +196,7 @@ class TomlConfigTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(calls, [("responses", False)])
+        self.assertEqual(calls, [("local-gateway", True)])
 
     def test_native_only_catalog_emits_no_provider_marker(self) -> None:
         payload = self.multi_catalog().to_dict()
@@ -242,12 +242,12 @@ class TomlConfigTests(unittest.TestCase):
 
         candidate = apply_codex_config(
             legacy,
-            self.multi_catalog(),
+            default_catalog(),
             auth_command_factory=lambda provider_id, start_bridge: ["helper", provider_id],
         )
 
         self.assertNotIn("CODEX-DEEPSEEK-FANOUT", candidate)
-        self.assertEqual(candidate.count("[model_providers.deepseek]\n"), 1)
+        self.assertEqual(candidate.count("[model_providers.multi-relay]\n"), 1)
 
     def test_apply_preserves_parent_and_enables_eight_native_children(self) -> None:
         original = (

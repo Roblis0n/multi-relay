@@ -92,6 +92,8 @@ class FanoutInstructionTests(unittest.TestCase):
         self.assertIn("text, tools", policy)
         self.assertIn("text, vision, audio, tools", policy)
         self.assertIn("trust=high", policy)
+        self.assertIn("pool=general", policy)
+        self.assertNotIn("provider=deepseek", policy)
 
     def test_apply_replaces_the_legacy_deepseek_managed_block(self) -> None:
         legacy = """# Keep\n\n<!-- BEGIN CODEX-DEEPSEEK-FANOUT -->

@@ -530,11 +530,9 @@ class ManagerTests(unittest.TestCase):
                 "agents",
             )
             self.assertNotIn("multi_agent_version", migrated_text)
-            auth_args = migrated["model_providers"]["deepseek"]["auth"]["args"]
-            self.assertEqual(
-                auth_args[auth_args.index("--vault-target") + 1],
-                "codex-deepseek-api-key",
-            )
+            auth_args = migrated["model_providers"]["multi-relay"]["auth"]["args"]
+            self.assertIn("--gateway", auth_args)
+            self.assertNotIn("--vault-target", auth_args)
             self.assertFalse(catalog.exists())
             self.assertFalse(legacy_agent.exists())
             self.assertEqual(

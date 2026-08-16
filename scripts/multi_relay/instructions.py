@@ -26,9 +26,16 @@ def _agent_table(catalog: Catalog) -> str:
         capabilities = ", ".join(
             item for item in capability_order if item in agent.capabilities
         )
-        provider = catalog.provider(agent.provider)
+        pool = catalog.pool(agent.pool_id)
+        protocols = {
+            catalog.target(target_id).protocol
+            or catalog.provider(catalog.target(target_id).provider_id).protocol
+            for target_id in pool.targets
+            if catalog.target(target_id).enabled
+        }
+        route = "codex-native" if protocols == {"codex-native"} else "gateway"
         lines.append(
-            f"- `{agent.name}`: provider={provider.id}; protocol={provider.protocol}; "
+            f"- `{agent.name}`: pool={pool.id}; route={route}; "
             f"capabilities={capabilities}; trust={agent.trust}; priority={agent.priority}; "
             f"sandbox={agent.sandbox_mode}"
         )

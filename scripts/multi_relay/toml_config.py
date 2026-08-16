@@ -11,6 +11,7 @@ from typing import Any
 from .bridge import BRIDGE_BASE_URL
 from .catalog import Catalog
 from .errors import ManagerError
+from .gateway import GATEWAY_BASE_URL
 
 
 PROVIDER_BEGIN = "# BEGIN CODEX-MULTI-RELAY PROVIDERS"
@@ -164,43 +165,33 @@ def build_provider_blocks(
     catalog: Catalog,
     auth_command_factory: Callable[[str, bool], list[str]] | None = None,
 ) -> str:
-    """Render enabled non-native providers from the validated catalog."""
+    """Render one stable gateway provider for every API-backed Codex pool."""
 
-    sections: list[str] = []
-    for provider in catalog.providers:
-        if not provider.enabled or provider.protocol == "codex-native":
-            continue
-        if provider.protocol == "responses-compatible":
-            base_url = provider.base_url
-            start_bridge = False
-        else:
-            base_url = f"{BRIDGE_BASE_URL}/providers/{provider.id}"
-            start_bridge = True
-        if base_url is None:
-            raise ManagerError(
-                "catalog_invalid",
-                f"Provider {provider.id} has no usable base URL.",
-                {"provider": provider.id},
-            )
-        lines = [
-            f"[model_providers.{provider.id}]",
-            f"name = {_toml_string(provider.name)}",
-            f"base_url = {_toml_string(base_url)}",
-            'wire_api = "responses"',
-        ]
-        if provider.auth == "vault":
-            if auth_command_factory is None:
-                raise ManagerError(
-                    "invalid_auth_command",
-                    f"Provider {provider.id} requires a credential helper.",
-                    {"provider": provider.id},
-                )
-            lines.extend(["", f"[model_providers.{provider.id}.auth]"])
-            lines.extend(_provider_auth_lines(auth_command_factory(provider.id, start_bridge)))
-        sections.append("\n".join(lines))
-    if not sections:
+    host = catalog.hosts.get("codex")
+    has_http_target = any(
+        target.enabled
+        and "codex" in target.host_compatibility
+        and catalog.provider(target.provider_id).enabled
+        and catalog.provider(target.provider_id).protocol != "codex-native"
+        for target in catalog.targets
+    )
+    if host is None or not host.enabled or not has_http_target:
         return ""
-    return f"{PROVIDER_BEGIN}\n" + "\n\n".join(sections) + f"\n{PROVIDER_END}\n"
+    if auth_command_factory is None:
+        raise ManagerError(
+            "invalid_auth_command",
+            "The Multi Relay gateway requires a local token helper.",
+        )
+    lines = [
+        "[model_providers.multi-relay]",
+        'name = "Multi Relay"',
+        f"base_url = {_toml_string(GATEWAY_BASE_URL)}",
+        'wire_api = "responses"',
+        "",
+        "[model_providers.multi-relay.auth]",
+        *_provider_auth_lines(auth_command_factory("local-gateway", True)),
+    ]
+    return f"{PROVIDER_BEGIN}\n" + "\n".join(lines) + f"\n{PROVIDER_END}\n"
 
 
 def build_provider_block(auth_command: list[str]) -> str:

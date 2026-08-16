@@ -959,6 +959,16 @@ def provider_auth_command(
     return command
 
 
+def gateway_auth_command(codex_home: Path | None = None) -> list[str]:
+    """Return a helper command that exposes only the short-lived local token."""
+
+    helper = Path(__file__).with_name("credential_helper.py").resolve()
+    command = [sys.executable, str(helper), "--gateway"]
+    if codex_home is not None:
+        command.extend(["--codex-home", str(codex_home)])
+    return command
+
+
 def prompt_and_store(
     store: CredentialStore,
     *,

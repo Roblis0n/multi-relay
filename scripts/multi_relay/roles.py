@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Mapping
 
-from .catalog import AgentSpec, Catalog
+from .catalog import AgentSpec, Catalog, ExecutionTarget
 from .errors import ManagerError
 from .model_capabilities import ModelSelection
 
@@ -55,17 +55,44 @@ def _toml_value(value: Any) -> str:
     raise ManagerError("invalid_agent", "Generated agent configuration contains an unsupported TOML value.")
 
 
+def _agent_targets(agent: AgentSpec, catalog: Catalog) -> tuple[ExecutionTarget, ...]:
+    """Return the enabled Codex targets visible to an agent's primary pool."""
+
+    pool = catalog.pool(agent.pool_id)
+    return tuple(
+        target
+        for target_id in pool.targets
+        for target in (catalog.target(target_id),)
+        if target.enabled
+        and "codex" in target.host_compatibility
+        and catalog.provider(target.provider_id).enabled
+    )
+
+
+def _target_protocol(target: ExecutionTarget, catalog: Catalog) -> str:
+    return target.protocol or catalog.provider(target.provider_id).protocol
+
+
 def _catalog_agent_lines(agent: AgentSpec, catalog: Catalog) -> list[str]:
-    provider = catalog.provider(agent.provider)
+    targets = _agent_targets(agent, catalog)
+    native = bool(targets) and all(
+        _target_protocol(target, catalog) == "codex-native" for target in targets
+    )
     lines = [
         f"name = {_toml_string(agent.name)}",
         f"description = {_toml_string(agent.description)}",
     ]
-    if agent.model is not None:
-        lines.append(f"model = {_toml_string(agent.model)}")
-    if provider.protocol != "codex-native":
-        lines.append(f"model_provider = {_toml_string(provider.id)}")
-    context_window = agent.context_window or provider.context_window
+    if not native:
+        lines.extend(
+            [
+                f"model = {_toml_string(f'multi-relay-agent-{agent.name}')}",
+                'model_provider = "multi-relay"',
+            ]
+        )
+    target_windows = [
+        target.context_window for target in targets if target.context_window is not None
+    ]
+    context_window = agent.context_window or (min(target_windows) if target_windows else None)
     if context_window is not None:
         lines.append(f"model_context_window = {context_window}")
     if agent.reasoning_effort is not None:
@@ -152,6 +179,7 @@ def expected_agent_files(
                 agent, catalog=selection
             ).encode("utf-8")
             for agent in selection.agents
+            if "codex" in agent.hosts
         }
 
     return {
