@@ -27,6 +27,7 @@ class Paths:
     runtime_state: Path
     runtime_state_lock: Path
     gateway_state: Path
+    user_home: Path | None = None
 
     @property
     def codex_host_manifest(self) -> Path:
@@ -38,7 +39,13 @@ class Paths:
     def claude_user_agents_dir(self) -> Path:
         """Default user-scope Claude Code subagent directory."""
 
-        return self.home.parent / ".claude" / "agents"
+        return (self.user_home or self.home.parent) / ".claude" / "agents"
+
+    @property
+    def claude_host_manifest(self) -> Path:
+        """Ownership snapshot for the Claude Code host adapter."""
+
+        return self.state_dir / "hosts" / "claude-code.json"
 
 
 def resolve_paths(
@@ -89,4 +96,5 @@ def resolve_paths(
         runtime_state=product_state_dir / "runtime-state.json",
         runtime_state_lock=product_state_dir / "runtime-state.lock",
         gateway_state=product_state_dir / "gateway-state.json",
+        user_home=selected_user_home,
     )

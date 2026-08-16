@@ -6,7 +6,7 @@ import hashlib
 import json
 import tempfile
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1705,3 +1705,25 @@ class RelayManager:
                                 self._credential_for_reference(provider, reference).remove()
             self._bridge_stopper()
             return {"status": "uninstalled", "backup": str(transaction.backup_dir)}
+
+    def launch_claude_code(
+        self,
+        arguments: Sequence[str] = (),
+        *,
+        pool: str | None = None,
+        executable: str | None = None,
+        keep_gateway: bool = False,
+        **launcher_options: Any,
+    ) -> int:
+        """Launch Claude Code against this installation's local gateway."""
+
+        from .hosts.claude_code import launch_claude_code
+
+        return launch_claude_code(
+            arguments,
+            pool=pool,
+            executable=executable,
+            codex_home=self.paths.home,
+            keep_gateway=keep_gateway,
+            **launcher_options,
+        )

@@ -24,5 +24,6 @@ class HostPlan:
 
 
 from .codex import CodexHostAdapter  # noqa: E402
+from .claude_code import ClaudeCodeHostAdapter  # noqa: E402
 
-__all__ = ["CodexHostAdapter", "HostPlan"]
+__all__ = ["ClaudeCodeHostAdapter", "CodexHostAdapter", "HostPlan"]

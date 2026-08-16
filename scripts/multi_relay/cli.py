@@ -14,6 +14,7 @@ from typing import Any
 from .catalog import AgentSpec, Catalog, ProviderSpec
 from .credentials import prompt_and_store
 from .errors import ManagerError
+from .hosts.claude_code import launch_claude_code
 from .manager import RelayManager
 from .paths import resolve_paths
 
@@ -115,6 +116,21 @@ def build_parser() -> argparse.ArgumentParser:
     route = commands.add_parser("route", parents=[common], help="Resolve a capability request.")
     route.add_argument("--capability", action="append", required=True)
     route.add_argument("--high-risk", action="store_true")
+    launch = commands.add_parser("launch", help="Launch a supported host through Multi Relay.")
+    launch_commands = launch.add_subparsers(dest="launch_host", required=True)
+    claude = launch_commands.add_parser(
+        "claude-code",
+        parents=[common],
+        help="Launch Claude Code through the local Anthropic gateway.",
+    )
+    claude.add_argument("--claude-bin", help="Explicit Claude Code executable path.")
+    claude.add_argument("--pool", help="Target pool id; defaults to the Claude Code host pool.")
+    claude.add_argument(
+        "--keep-gateway",
+        action="store_true",
+        help="Keep a gateway started by this launcher running after Claude exits.",
+    )
+    claude.add_argument("claude_args", nargs=argparse.REMAINDER)
     uninstall = commands.add_parser(
         "uninstall",
         parents=[common],
@@ -267,11 +283,21 @@ def main(
     *,
     manager_factory: Callable[[argparse.Namespace], RelayManager] | None = None,
     prompt_fn: Callable[[str], str] = getpass.getpass,
+    claude_launcher: Callable[..., int] = launch_claude_code,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     factory = manager_factory or _default_manager
     try:
+        if args.command == "launch" and args.launch_host == "claude-code":
+            paths = resolve_paths(args.codex_home)
+            return claude_launcher(
+                args.claude_args,
+                pool=args.pool,
+                executable=args.claude_bin,
+                codex_home=paths.home,
+                keep_gateway=args.keep_gateway,
+            )
         manager = factory(args)
         if args.command == "setup":
             if args.preset == "hybrid":
