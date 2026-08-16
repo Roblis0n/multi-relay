@@ -75,7 +75,13 @@ class FakeManager:
         self.calls.append(("provider-remove", (provider_id, remove_credential)))
         return {"status": "ready"}
 
-    def credential_for_provider(self, provider: object) -> FakeStore:
+    def credential_for_provider(
+        self,
+        provider: object,
+        *,
+        catalog: object | None = None,
+    ) -> FakeStore:
+        del catalog
         self.calls.append(("credential-for", provider))
         return self.credentials
 
@@ -154,7 +160,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(store.secret, "sk-test")
-        self.assertEqual(manager.calls, [("setup", "hybrid")])
+        self.assertEqual(manager.calls, [("status", None), ("setup", "hybrid")])
         self.assertEqual(json.loads(stdout.getvalue())["status"], "ready")
         self.assertNotIn("sk-test", stdout.getvalue())
         self.assertNotIn("sk-test", stderr.getvalue())
@@ -212,6 +218,32 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(prompts, 0)
         self.assertEqual(manager.calls, [("setup", "native")])
+
+    def test_legacy_setup_does_not_prompt_or_write_the_canonical_slot(self) -> None:
+        manager = FakeManager(FakeStore())
+        prompts = 0
+
+        def status() -> dict[str, object]:
+            manager.calls.append(("status", None))
+            return {"status": "legacy"}
+
+        def prompt(_: str) -> str:
+            nonlocal prompts
+            prompts += 1
+            return "must-not-be-written"
+
+        manager.status = status  # type: ignore[method-assign]
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            code = main(
+                ["setup", "--json"],
+                manager_factory=lambda args: manager,
+                prompt_fn=prompt,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(prompts, 0)
+        self.assertIsNone(manager.credentials.secret)
+        self.assertEqual(manager.calls, [("status", None), ("setup", "hybrid")])
 
     def test_provider_add_builds_valid_definition_and_prompts_only_vault(self) -> None:
         manager = FakeManager(FakeStore())

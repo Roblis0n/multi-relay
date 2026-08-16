@@ -123,6 +123,7 @@ class ManagerTests(unittest.TestCase):
             resolve_paths(str(home)),
             "codex.exe",
             credentials=credentials,
+            credential_reference_factory=lambda provider, reference: credentials,
             model_discoverer=discover,
             selection_resolver=resolve,
             compatibility_gate=gate,
@@ -529,6 +530,11 @@ class ManagerTests(unittest.TestCase):
                 "agents",
             )
             self.assertNotIn("multi_agent_version", migrated_text)
+            auth_args = migrated["model_providers"]["deepseek"]["auth"]["args"]
+            self.assertEqual(
+                auth_args[auth_args.index("--vault-target") + 1],
+                "codex-deepseek-api-key",
+            )
             self.assertFalse(catalog.exists())
             self.assertFalse(legacy_agent.exists())
             self.assertEqual(

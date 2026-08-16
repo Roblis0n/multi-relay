@@ -402,6 +402,14 @@ class CompatibilityTests(unittest.TestCase):
             effort_source="empirical_codex_provider_probe",
         )
         isolated_homes: list[Path] = []
+        auth_command = [
+            "python",
+            "credential_helper.py",
+            "--credential",
+            "primary",
+            "--vault-target",
+            "codex-deepseek-api-key",
+        ]
 
         def runner(command: list[str], **kwargs: object) -> SimpleNamespace:
             self.assertEqual(kwargs.get("encoding"), "utf-8")
@@ -418,6 +426,9 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(isolated_config["model"], "deepseek-v4-pro")
             self.assertEqual(isolated_config["model_provider"], "deepseek")
             self.assertEqual(isolated_config["model_reasoning_effort"], "xhigh")
+            isolated_auth = isolated_config["model_providers"]["deepseek"]["auth"]
+            self.assertEqual(isolated_auth["command"], auth_command[0])
+            self.assertEqual(isolated_auth["args"], auth_command[1:])
             prompt = command[-1]
             if "DEEPSEEK_GATE_DIRECT_OK" in prompt:
                 return SimpleNamespace(
@@ -447,6 +458,7 @@ class CompatibilityTests(unittest.TestCase):
                 "codex.exe",
                 real_home,
                 selection,
+                auth_command=auth_command,
                 runner=runner,
             )
 

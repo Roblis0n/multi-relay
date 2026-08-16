@@ -16,6 +16,7 @@ from .bridge import BRIDGE_BASE_URL, stop_bridge
 from .catalog import (
     AgentSpec,
     Catalog,
+    CredentialRef,
     ProviderSpec,
     default_catalog,
     load_catalog,
@@ -27,6 +28,7 @@ from .credentials import (
     CredentialStore,
     credential_store,
     credential_target,
+    legacy_credential_target,
     provider_auth_command,
 )
 from .errors import ManagerError
@@ -134,11 +136,16 @@ class RelayManager:
         *,
         credentials: CredentialStore | None = None,
         credential_factory: Callable[[ProviderSpec], CredentialStore] | None = None,
+        credential_reference_factory: Callable[
+            [ProviderSpec, CredentialRef], CredentialStore
+        ]
+        | None = None,
         model_discoverer: Callable[..., str] = discover_model,
         selection_resolver: Callable[[str], ModelSelection] | None = None,
         compatibility_gate: Callable[
             [str, Path, ModelSelection], CompatibilityReport
-        ] = run_isolated_gate,
+        ]
+        | None = None,
         live_acceptance: Callable[
             [str, Path, ModelSelection], CompatibilityReport
         ] = native_acceptance_report,
@@ -153,6 +160,7 @@ class RelayManager:
                 protocol=provider.protocol,
             )
         )
+        self._credential_reference_factory = credential_reference_factory
         self._model_discoverer = model_discoverer
         self._selection_resolver = selection_resolver
         self._compatibility_gate = compatibility_gate
@@ -223,19 +231,35 @@ class RelayManager:
         except ValueError:
             raise ManagerError("unsafe_target", "A managed path escaped Codex Home.") from None
 
-    def _default_selection(self, model: str) -> ModelSelection:
+    def _default_selection(
+        self,
+        model: str,
+        *,
+        auth_command: list[str] | None = None,
+    ) -> ModelSelection:
         with tempfile.TemporaryDirectory(prefix="codex-multi-relay-effort-") as directory:
             home = Path(directory).resolve()
             (home / "config.toml").write_text(
-                apply_codex_config("", provider_auth_command()),
+                apply_codex_config(
+                    "",
+                    provider_auth_command() if auth_command is None else auth_command,
+                ),
                 encoding="utf-8",
                 newline="\n",
             )
             return probe_efforts(self.codex_bin, home, model)
 
-    def _resolve_selection(self, model: str) -> ModelSelection:
-        resolver = self._selection_resolver or self._default_selection
-        selection = resolver(model)
+    def _resolve_selection(
+        self,
+        model: str,
+        *,
+        auth_command: list[str] | None = None,
+    ) -> ModelSelection:
+        selection = (
+            self._selection_resolver(model)
+            if self._selection_resolver is not None
+            else self._default_selection(model, auth_command=auth_command)
+        )
         if selection.resolved_model != model:
             raise ManagerError(
                 "model_selection_mismatch",
@@ -389,20 +413,78 @@ class RelayManager:
             return self.credentials
         return self._credential_factory(provider)
 
-    def credential_for_provider(self, provider: ProviderSpec) -> CredentialStore:
+    @staticmethod
+    def _credential_reference(catalog: Catalog, provider: ProviderSpec) -> CredentialRef:
+        enabled = [
+            item
+            for item in catalog.credentials
+            if item.provider_id == provider.id and item.enabled
+        ]
+        primary = [item for item in enabled if item.id == "primary"]
+        if len(primary) == 1:
+            return primary[0]
+        if len(enabled) == 1:
+            return enabled[0]
+        if not enabled:
+            raise ManagerError(
+                "credential_required",
+                f"Provider {provider.id} has no enabled credential reference.",
+                {"provider": provider.id},
+            )
+        raise ManagerError(
+            "ambiguous_credential",
+            f"Provider {provider.id} has multiple enabled credentials and no primary reference.",
+            {"provider": provider.id},
+        )
+
+    def _credential_for_reference(
+        self,
+        provider: ProviderSpec,
+        reference: CredentialRef,
+    ) -> CredentialStore:
+        if self._credential_reference_factory is not None:
+            return self._credential_reference_factory(provider, reference)
+        return credential_store(
+            provider_id=provider.id,
+            credential_id=reference.id,
+            protocol=provider.protocol,
+            vault_target=reference.vault_target,
+            label=reference.label,
+        )
+
+    def _provider_auth_command(
+        self,
+        catalog: Catalog,
+        provider: ProviderSpec,
+        start_bridge: bool,
+    ) -> list[str]:
+        reference = self._credential_reference(catalog, provider)
+        return provider_auth_command(
+            provider.id,
+            self.paths.home,
+            start_bridge,
+            credential_id=reference.id,
+            protocol=provider.protocol,
+            vault_target=reference.vault_target,
+        )
+
+    def credential_for_provider(
+        self,
+        provider: ProviderSpec,
+        *,
+        catalog: Catalog | None = None,
+    ) -> CredentialStore:
         """Expose the scoped vault selected for an already validated provider."""
 
+        if catalog is not None and provider.auth_mode == "vault":
+            reference = self._credential_reference(catalog, provider)
+            return self._credential_for_reference(provider, reference)
         return self._credential_for(provider)
 
     def _auth_factory(self, catalog: Catalog) -> Callable[[str, bool], list[str]]:
         def command(provider_id: str, start_bridge: bool) -> list[str]:
             provider = catalog.provider(provider_id)
-            return provider_auth_command(
-                provider.id,
-                self.paths.home,
-                start_bridge,
-                protocol=provider.protocol,
-            )
+            return self._provider_auth_command(catalog, provider, start_bridge)
 
         return command
 
@@ -418,7 +500,8 @@ class RelayManager:
         if not providers:
             return catalog, None, None
         provider = providers[0]
-        secret = self._credential_for(provider).read()
+        reference = self._credential_reference(catalog, provider)
+        secret = self._credential_for_reference(provider, reference).read()
         if not secret:
             raise ManagerError(
                 "credential_missing",
@@ -438,7 +521,8 @@ class RelayManager:
             model = discover_model(secret, requested, provider=provider)
         else:
             model = self._model_discoverer(secret)
-        selection = self._resolve_selection(model)
+        auth_command = self._provider_auth_command(catalog, provider, True)
+        selection = self._resolve_selection(model, auth_command=auth_command)
         payload = catalog.to_dict()
         selected_target_ids: set[str] = set()
         for target in payload["targets"]:
@@ -472,7 +556,16 @@ class RelayManager:
             ):
                 agent["reasoning_effort"] = selection.reasoning_effort
         selected_catalog = Catalog.from_dict(payload)
-        gate = self._compatibility_gate(self.codex_bin, self.paths.home, selection)
+        gate = (
+            run_isolated_gate(
+                self.codex_bin,
+                self.paths.home,
+                selection,
+                auth_command=auth_command,
+            )
+            if self._compatibility_gate is None
+            else self._compatibility_gate(self.codex_bin, self.paths.home, selection)
+        )
         self._require_report(gate, "isolated pre-install")
         return selected_catalog, selection, gate
 
@@ -779,6 +872,17 @@ class RelayManager:
                     )
                     working_config = migration.config_text
                 catalog = default_catalog(preset)
+                if migration is not None:
+                    payload = catalog.to_dict()
+                    for reference in payload["credentials"]:
+                        if (
+                            isinstance(reference, dict)
+                            and reference.get("provider_id") == "deepseek"
+                        ):
+                            reference["vault_target"] = legacy_credential_target(
+                                "deepseek"
+                            )
+                    catalog = Catalog.from_dict(payload)
             # Ownership conflicts are local and deterministic; reject them before
             # any provider discovery or compatibility process is started.
             self._assert_role_ownership(
@@ -959,7 +1063,8 @@ class RelayManager:
                         "provider_id": selected.id,
                         "vault_target": credential_target(
                             selected.id,
-                            selected.protocol,
+                            "primary",
+                            protocol=selected.protocol,
                         ),
                         "enabled": True,
                         "created_at": datetime.now(timezone.utc)
@@ -979,6 +1084,7 @@ class RelayManager:
         remove_credential: bool = False,
     ) -> dict[str, Any]:
         removed: list[ProviderSpec] = []
+        removed_credentials: list[CredentialRef] = []
 
         def mutate(catalog: Catalog) -> Catalog:
             provider = catalog.provider(provider_id)
@@ -999,6 +1105,9 @@ class RelayManager:
                     },
                 )
             removed.append(provider)
+            removed_credentials.extend(
+                item for item in catalog.credentials if item.provider_id == provider.id
+            )
             payload = catalog.to_dict()
             providers = payload["providers"]
             assert isinstance(providers, list)
@@ -1019,7 +1128,8 @@ class RelayManager:
 
         result = self._mutate_catalog("provider-remove", mutate)
         if remove_credential and removed and removed[0].auth == "vault":
-            self._credential_for(removed[0]).remove()
+            for reference in removed_credentials:
+                self._credential_for_reference(removed[0], reference).remove()
         return result
 
     def set_agent(self, agent: AgentSpec | dict[str, object]) -> dict[str, Any]:
@@ -1310,7 +1420,11 @@ class RelayManager:
         for provider in catalog.providers:
             if provider.enabled and provider.auth == "vault":
                 try:
-                    credential_presence[provider.id] = self._credential_for(provider).exists()
+                    reference = self._credential_reference(catalog, provider)
+                    credential_presence[provider.id] = self._credential_for_reference(
+                        provider,
+                        reference,
+                    ).exists()
                 except ManagerError:
                     credential_presence[provider.id] = False
         if manifest.get("status") == "disabled":
@@ -1581,6 +1695,8 @@ class RelayManager:
             if remove_credential:
                 for provider in catalog.providers:
                     if provider.auth == "vault":
-                        self._credential_for(provider).remove()
+                        for reference in catalog.credentials:
+                            if reference.provider_id == provider.id:
+                                self._credential_for_reference(provider, reference).remove()
             self._bridge_stopper()
             return {"status": "uninstalled", "backup": str(transaction.backup_dir)}

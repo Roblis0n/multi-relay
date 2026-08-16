@@ -21,6 +21,7 @@ from .catalog import (
     save_catalog_bytes,
 )
 from .errors import ManagerError
+from .credentials import legacy_credential_target
 from .paths import Paths
 from .toml_config import _remove_table_key, _set_table_value
 from .transaction import atomic_write
@@ -257,6 +258,12 @@ def catalog_from_schema4(manifest: dict[str, Any]) -> Catalog:
         raise ManagerError("invalid_manifest", "The legacy concurrency value is invalid.")
     payload = default_catalog("hybrid").to_dict()
     payload["concurrency"] = concurrency
+    for credential in payload["credentials"]:
+        if (
+            isinstance(credential, dict)
+            and credential.get("provider_id") == "deepseek"
+        ):
+            credential["vault_target"] = legacy_credential_target("deepseek")
     deepseek_targets: set[str] = set()
     for target in payload["targets"]:
         if isinstance(target, dict) and target.get("provider_id") == "deepseek":

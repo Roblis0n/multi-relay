@@ -18,7 +18,10 @@ from multi_relay import ManagerError  # noqa: E402
 from multi_relay import credential_helper  # noqa: E402
 from multi_relay.credentials import (  # noqa: E402
     CREDENTIAL_TARGET,
+    LOCAL_GATEWAY_CREDENTIAL_ID,
+    LOCAL_GATEWAY_PROVIDER_ID,
     MacOSCredentialStore,
+    VaultLocator,
     WindowsCredentialStore,
     credential_store,
     credential_target,
@@ -64,19 +67,27 @@ class FakeMacOSApi:
 
 
 class CredentialTests(unittest.TestCase):
-    def test_credential_targets_are_provider_scoped_with_deepseek_legacy_compatibility(self) -> None:
-        self.assertEqual(credential_target("deepseek", "deepseek-chat"), CREDENTIAL_TARGET)
+    def test_credential_targets_are_provider_and_credential_scoped(self) -> None:
         self.assertEqual(
-            credential_target("vendor-one", "chat-completions-compatible"),
-            "codex-multi-relay-vendor-one-api-key",
+            credential_target("deepseek", "primary", protocol="deepseek-chat"),
+            "multi-relay/deepseek/primary",
         )
+        self.assertEqual(
+            credential_target(
+                "vendor-one",
+                "backup",
+                protocol="chat-completions-compatible",
+            ),
+            "multi-relay/vendor-one/backup",
+        )
+        self.assertEqual(CREDENTIAL_TARGET, "codex-deepseek-api-key")
 
     def test_generic_store_accepts_provider_token_and_uses_scoped_target(self) -> None:
         api = FakeWindowsApi()
         store = WindowsCredentialStore(
             api=api,
             account="local-user",
-            target="codex-multi-relay-vendor-api-key",
+            locator=VaultLocator("vendor", "backup"),
             protocol="chat-completions-compatible",
         )
 
@@ -84,7 +95,7 @@ class CredentialTests(unittest.TestCase):
 
         self.assertEqual(
             api.write_calls,
-            [("codex-multi-relay-vendor-api-key", "local-user", "provider-token")],
+            [("multi-relay/vendor/backup", "local-user", "provider-token")],
         )
 
     def test_custom_deepseek_provider_uses_protocol_aware_secret_validation(self) -> None:
@@ -107,13 +118,17 @@ class CredentialTests(unittest.TestCase):
 
     def test_windows_store_delegates_to_credential_blob_api_without_subprocess(self) -> None:
         api = FakeWindowsApi()
-        store = WindowsCredentialStore(api=api, account="local-user")
+        store = WindowsCredentialStore(
+            api=api,
+            account="local-user",
+            locator=VaultLocator("deepseek", "primary"),
+        )
 
         store.store("sk-test")
 
         self.assertEqual(
             api.write_calls,
-            [(CREDENTIAL_TARGET, "local-user", "sk-test")],
+            [("multi-relay/deepseek/primary", "local-user", "sk-test")],
         )
         self.assertEqual(store.read(), "sk-test")
         self.assertTrue(store.remove())
@@ -121,13 +136,16 @@ class CredentialTests(unittest.TestCase):
 
     def test_macos_store_uses_native_keychain_api_without_subprocess_argv(self) -> None:
         api = FakeMacOSApi()
-        store = MacOSCredentialStore(api=api, account="local-user")
+        store = MacOSCredentialStore(
+            api=api,
+            locator=VaultLocator("deepseek", "primary"),
+        )
 
         store.store("sk-test")
 
         self.assertEqual(
             api.write_calls,
-            [(CREDENTIAL_TARGET, "local-user", "sk-test")],
+            [("multi-relay", "deepseek/primary", "sk-test")],
         )
         self.assertEqual(store.read(), "sk-test")
         self.assertTrue(store.remove())
@@ -137,7 +155,10 @@ class CredentialTests(unittest.TestCase):
             def write(self, target: str, account: str, secret: str) -> None:
                 raise OSError(f"backend rejected {secret}")
 
-        store = MacOSCredentialStore(api=FailingApi(), account="local-user")
+        store = MacOSCredentialStore(
+            api=FailingApi(),
+            locator=VaultLocator("deepseek", "primary"),
+        )
 
         with self.assertRaises(ManagerError) as raised:
             store.store("sk-test")
@@ -147,12 +168,20 @@ class CredentialTests(unittest.TestCase):
 
     def test_masked_prompt_stores_key_without_printing_it(self) -> None:
         api = FakeWindowsApi()
-        store = WindowsCredentialStore(api=api, account="local-user")
+        store = WindowsCredentialStore(
+            api=api,
+            account="local-user",
+            locator=VaultLocator("deepseek", "primary"),
+        )
         stdout = io.StringIO()
         stderr = io.StringIO()
 
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            prompt_and_store(store, prompt_fn=lambda _: "sk-test")
+            prompt_and_store(
+                store,
+                credential_label="Primary",
+                prompt_fn=lambda prompt: "sk-test",
+            )
 
         self.assertEqual(store.read(), "sk-test")
         self.assertEqual(stdout.getvalue(), "")
@@ -169,12 +198,19 @@ class CredentialTests(unittest.TestCase):
     def test_provider_auth_command_scopes_provider_and_bridge_start_without_secret(self) -> None:
         command = provider_auth_command(
             "vendor",
+            credential_id="backup",
             start_bridge=False,
             protocol="responses-compatible",
+            vault_target="codex-multi-relay-vendor-api-key",
         )
 
         self.assertIn("--provider", command)
         self.assertIn("vendor", command)
+        self.assertEqual(command[command.index("--credential") + 1], "backup")
+        self.assertEqual(
+            command[command.index("--vault-target") + 1],
+            "codex-multi-relay-vendor-api-key",
+        )
         self.assertIn("--no-start-bridge", command)
         self.assertEqual(
             command[command.index("--protocol") + 1],
@@ -216,8 +252,12 @@ class CredentialTests(unittest.TestCase):
                 [
                     "--provider",
                     "vendor",
+                    "--credential",
+                    "backup",
                     "--protocol",
                     "responses-compatible",
+                    "--vault-target",
+                    "codex-multi-relay-vendor-api-key",
                     "--no-start-bridge",
                 ]
             )
@@ -225,7 +265,9 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(code, 0)
         factory.assert_called_once_with(
             provider_id="vendor",
+            credential_id="backup",
             protocol="responses-compatible",
+            vault_target="codex-multi-relay-vendor-api-key",
         )
         ensure.assert_not_called()
         self.assertEqual(stdout.getvalue(), "provider-token")
@@ -291,6 +333,11 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(code, 4)
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
+
+    def test_local_gateway_locator_is_separate_from_upstream_credentials(self) -> None:
+        locator = VaultLocator(LOCAL_GATEWAY_PROVIDER_ID, LOCAL_GATEWAY_CREDENTIAL_ID)
+
+        self.assertEqual(locator.target, "multi-relay/local-gateway/session")
 
 
 if __name__ == "__main__":

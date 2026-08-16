@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from .credentials import credential_target
+from .credentials import credential_target, legacy_credential_target
 from .errors import ManagerError
 
 
@@ -1723,8 +1723,7 @@ class Catalog:
 
 
 def _legacy_vault_target(provider_id: str) -> str:
-    protocol = "deepseek-chat" if provider_id == "deepseek" else None
-    return credential_target(provider_id, protocol)
+    return legacy_credential_target(provider_id)
 
 
 def _target_identifier(
@@ -2221,9 +2220,13 @@ def _default_payload(preset: str) -> dict[str, object]:
         "enabled": True,
     }
     deepseek_credential = {
-        "id": "deepseek-primary",
+        "id": "primary",
         "provider_id": "deepseek",
-        "vault_target": credential_target("deepseek", "deepseek-chat"),
+        "vault_target": credential_target(
+            "deepseek",
+            "primary",
+            protocol="deepseek-chat",
+        ),
         "enabled": True,
         "created_at": "1970-01-01T00:00:00Z",
         "label": "Primary",
@@ -2233,7 +2236,7 @@ def _default_payload(preset: str) -> dict[str, object]:
         "provider_id": "deepseek",
         "protocol": None,
         "model": "deepseek-v4-pro",
-        "credential_id": "deepseek-primary",
+        "credential_id": "primary",
         "capabilities": ["text", "tool_calling"],
         "context_window": 1_000_000,
         "max_output_tokens": None,

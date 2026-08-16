@@ -17,7 +17,6 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 
 from multi_relay import ManagerError  # noqa: E402
 from multi_relay.catalog import route_agent, save_catalog_bytes  # noqa: E402
-from multi_relay.credentials import CREDENTIAL_TARGET  # noqa: E402
 from multi_relay.migration import (  # noqa: E402
     migrate_catalog_1_to_2,
     migrate_catalog_file,
@@ -226,7 +225,10 @@ class CatalogSchema2MigrationTests(unittest.TestCase):
             [(item.provider_id, item.id) for item in catalog.credentials],
             [("deepseek", "primary")],
         )
-        self.assertEqual(catalog.credentials[0].vault_target, CREDENTIAL_TARGET)
+        self.assertEqual(
+            catalog.credentials[0].vault_target,
+            "codex-deepseek-api-key",
+        )
 
         default = catalog.agent("default")
         worker = catalog.agent("worker")
@@ -299,6 +301,10 @@ class CatalogSchema2MigrationTests(unittest.TestCase):
             {("deepseek", "primary"), ("vendor", "primary")},
         )
         self.assertEqual(
+            catalog.credential("primary", provider_id="vendor").vault_target,
+            "codex-multi-relay-vendor-api-key",
+        )
+        self.assertEqual(
             catalog.target(
                 catalog.pool(catalog.agent("vendor-worker").pool_id).targets[0]
             ).credential_id,
@@ -345,7 +351,7 @@ class CatalogSchema2MigrationTests(unittest.TestCase):
         catalog = migrate_catalog_1_to_2(legacy_catalog())
         serialized = save_catalog_bytes(catalog)
 
-        self.assertIn(CREDENTIAL_TARGET.encode("utf-8"), serialized)
+        self.assertIn(b"codex-deepseek-api-key", serialized)
         self.assertNotIn(b"api_key", serialized.lower())
         self.assertNotIn(b"authorization", serialized.lower())
 

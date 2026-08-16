@@ -85,10 +85,12 @@ class MultiRelayMigrationTests(unittest.TestCase):
         events: list[str] | None = None,
     ) -> RelayManager:
         timeline = events if events is not None else []
+        credentials = store or FakeStore()
         return RelayManager(
             resolve_paths(str(home)),
             "codex.exe",
-            credentials=store or FakeStore(),
+            credentials=credentials,
+            credential_reference_factory=lambda provider, reference: credentials,
             model_discoverer=lambda secret: timeline.append("discover") or "deepseek-v4-pro",
             selection_resolver=lambda model: timeline.append("effort") or self.selection,
             compatibility_gate=lambda binary, path, selection: timeline.append("gate")
@@ -135,6 +137,66 @@ class MultiRelayMigrationTests(unittest.TestCase):
             {"low"},
         )
         self.assertEqual(catalog.concurrency, 11)
+        self.assertEqual(
+            catalog.credential("primary", provider_id="deepseek").vault_target,
+            "codex-deepseek-api-key",
+        )
+
+    def test_schema4_discovery_reads_the_catalog_reference_not_the_canonical_slot(self) -> None:
+        canonical = FakeStore(None)
+        legacy = FakeStore("sk-legacy")
+        factory_calls: list[dict[str, object]] = []
+
+        def store_factory(platform: str | None = None, **kwargs: object) -> FakeStore:
+            del platform
+            factory_calls.append(kwargs)
+            if kwargs.get("vault_target") == "codex-deepseek-api-key":
+                return legacy
+            return canonical
+
+        catalog = catalog_from_schema4(
+            {
+                "schema_version": 4,
+                "selection": {
+                    "resolved_model": "deepseek-v4-pro",
+                    "reasoning_effort": "xhigh",
+                },
+                "concurrency": 8,
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "multi_relay.relay_manager.credential_store",
+            side_effect=store_factory,
+        ):
+            manager = RelayManager(
+                resolve_paths(directory),
+                "codex.exe",
+                credentials=canonical,
+                model_discoverer=lambda secret: "deepseek-v4-pro",
+                selection_resolver=lambda model: self.selection,
+                compatibility_gate=lambda binary, path, selection: CompatibilityReport(
+                    model=selection.resolved_model,
+                    effort=selection.reasoning_effort,
+                    provider_initialized=True,
+                    single_child_passed=None,
+                    fanout_passed=None,
+                    tools_passed=None,
+                    resume_passed=None,
+                    child_metadata_passed=None,
+                    parent_unchanged=None,
+                ),
+            )
+            manager._discover_builtin_selection(catalog)
+
+        self.assertTrue(
+            any(
+                call.get("vault_target") == "codex-deepseek-api-key"
+                and call.get("credential_id") == "primary"
+                for call in factory_calls
+            )
+        )
+        self.assertIsNone(canonical.secret)
+        self.assertEqual(legacy.secret, "sk-legacy")
 
     def test_manager_transaction_migrates_schema1_and_records_backup_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -390,8 +452,14 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
             manager.setup()
             catalog = load_catalog(paths.catalog)
+            parsed = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+            auth_args = parsed["model_providers"]["deepseek"]["auth"]["args"]
 
             self.assertEqual({item.name for item in catalog.agents}, {"default", "worker", "explorer", "reviewer"})
+            self.assertEqual(
+                auth_args[auth_args.index("--vault-target") + 1],
+                "codex-deepseek-api-key",
+            )
             self.assertFalse(paths.relay_manifest.exists())
             self.assertEqual(json.loads(paths.manifest.read_text(encoding="utf-8"))["schema_version"], 5)
 

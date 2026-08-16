@@ -174,6 +174,7 @@ def run_isolated_gate(
     original_home: Path,
     selection: ModelSelection,
     *,
+    auth_command: list[str] | None = None,
     runner: Callable[..., Any] = subprocess.run,
 ) -> CompatibilityReport:
     """Probe the provider in a disposable home before the transactional install.
@@ -190,7 +191,10 @@ def run_isolated_gate(
     with tempfile.TemporaryDirectory(prefix="codex-multi-relay-gate-") as directory:
         home = Path(directory).resolve()
         paths = resolve_paths(str(home))
-        candidate = apply_codex_config(minimal_parent, provider_auth_command())
+        candidate = apply_codex_config(
+            minimal_parent,
+            provider_auth_command() if auth_command is None else auth_command,
+        )
         paths.config.parent.mkdir(parents=True, exist_ok=True)
         paths.config.write_text(candidate, encoding="utf-8", newline="\n")
         direct = _run_process(

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import AgentSpec, Catalog, ProviderSpec
-from .credentials import credential_store, prompt_and_store
+from .credentials import prompt_and_store
 from .errors import ManagerError
 from .manager import RelayManager
 from .paths import resolve_paths
@@ -196,7 +196,6 @@ def _default_manager(args: argparse.Namespace) -> RelayManager:
     return RelayManager(
         paths,
         find_codex(args.codex_bin, required=live_command, codex_home=paths.home),
-        credentials=credential_store(),
     )
 
 
@@ -258,7 +257,7 @@ def _prompt_catalog_credentials(
     catalog = Catalog.from_dict(catalog_value)
     for provider in catalog.providers:
         if provider.enabled and provider.auth == "vault":
-            store = manager.credential_for_provider(provider)
+            store = manager.credential_for_provider(provider, catalog=catalog)
             if not store.exists():
                 prompt_and_store(store, prompt_fn=prompt_fn)
 
@@ -275,17 +274,17 @@ def main(
     try:
         manager = factory(args)
         if args.command == "setup":
-            if args.preset == "hybrid" and not manager.credentials.exists():
-                prompt_and_store(manager.credentials, prompt_fn=prompt_fn)
+            if args.preset == "hybrid":
+                installation_status = manager.status().get("status")
+                if installation_status == "not_configured":
+                    if not manager.credentials.exists():
+                        prompt_and_store(manager.credentials, prompt_fn=prompt_fn)
+                elif installation_status != "legacy":
+                    _prompt_catalog_credentials(manager, manager.catalog(), prompt_fn)
             payload = manager.setup(preset=args.preset)
         elif args.command == "repair":
-            try:
+            if manager.status().get("status") != "legacy":
                 _prompt_catalog_credentials(manager, manager.catalog(), prompt_fn)
-            except ManagerError as exc:
-                if exc.code != "legacy_requires_setup":
-                    raise
-                if not manager.credentials.exists():
-                    prompt_and_store(manager.credentials, prompt_fn=prompt_fn)
             payload = manager.repair()
         elif args.command == "status":
             payload = manager.status()

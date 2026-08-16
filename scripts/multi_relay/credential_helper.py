@@ -20,7 +20,9 @@ else:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--provider", default="deepseek")
+    parser.add_argument("--credential", default="primary")
     parser.add_argument("--protocol")
+    parser.add_argument("--vault-target")
     parser.add_argument("--no-start-bridge", action="store_true")
     parser.add_argument("--codex-home")
     try:
@@ -30,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         secret = credential_store(
             provider_id=args.provider,
+            credential_id=args.credential,
             protocol=args.protocol,
+            vault_target=args.vault_target,
         ).read()
     except Exception:
         return 2
