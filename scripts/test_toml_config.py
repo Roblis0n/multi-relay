@@ -126,16 +126,66 @@ class TomlConfigTests(unittest.TestCase):
 
     def test_responses_vault_auth_uses_helper_without_starting_bridge(self) -> None:
         payload = self.multi_catalog().to_dict()
+        responses = {
+            **payload["providers"][1],
+            "auth_mode": "vault",
+        }
         payload["providers"] = [
-            {**payload["providers"][1], "auth": "vault"}
+            responses
+        ]
+        payload["credentials"] = [
+            {
+                "id": "responses-default",
+                "provider_id": "responses",
+                "vault_target": "multi-relay/responses/default",
+                "enabled": True,
+                "created_at": "2026-08-16T00:00:00Z",
+                "label": "Primary",
+            }
+        ]
+        payload["targets"] = [
+            {
+                "id": "responses-primary",
+                "provider_id": "responses",
+                "protocol": None,
+                "model": "responses-model",
+                "credential_id": "responses-default",
+                "capabilities": ["text", "tool_calling"],
+                "context_window": 200000,
+                "max_output_tokens": None,
+                "reasoning_efforts": [],
+                "trust": "high",
+                "host_compatibility": ["codex"],
+                "enabled": True,
+                "metadata": {},
+            }
+        ]
+        payload["pools"] = [
+            {
+                "id": "responses-pool",
+                "targets": ["responses-primary"],
+                "strategy": "sticky",
+                "duration_seconds": None,
+                "max_rate_limit_wait_seconds": 30,
+                "cooldown": {
+                    "quota_seconds": 86400,
+                    "rate_limit_seconds": 60,
+                    "auth_seconds": 3600,
+                    "provider_seconds": 30,
+                },
+                "required_capabilities": ["text", "tool_calling"],
+                "host_compatibility": ["codex"],
+                "enabled": True,
+            }
         ]
         payload["agents"] = [
             {
                 **payload["agents"][0],
-                "provider": "responses",
-                "model": "responses-model",
+                "pool_id": "responses-pool",
+                "required_capabilities": ["text", "tool_calling"],
             }
         ]
+        payload["hosts"]["codex"]["default_pool"] = "responses-pool"
         catalog = Catalog.from_dict(payload)
         calls: list[tuple[str, bool]] = []
 
@@ -151,6 +201,7 @@ class TomlConfigTests(unittest.TestCase):
     def test_native_only_catalog_emits_no_provider_marker(self) -> None:
         payload = self.multi_catalog().to_dict()
         payload["providers"] = [payload["providers"][0]]
+        payload["credentials"] = []
         payload["agents"] = [payload["agents"][0]]
         catalog = Catalog.from_dict(payload)
 

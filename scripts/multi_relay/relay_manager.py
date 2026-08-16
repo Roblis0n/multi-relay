@@ -23,7 +23,12 @@ from .catalog import (
     save_catalog_bytes,
 )
 from .compatibility import CompatibilityReport, probe_efforts, run_isolated_gate
-from .credentials import CredentialStore, credential_store, provider_auth_command
+from .credentials import (
+    CredentialStore,
+    credential_store,
+    credential_target,
+    provider_auth_command,
+)
 from .errors import ManagerError
 from .instructions import (
     INSTRUCTIONS_BEGIN,
@@ -427,9 +432,36 @@ class RelayManager:
             model = self._model_discoverer(secret)
         selection = self._resolve_selection(model)
         payload = catalog.to_dict()
+        selected_target_ids: set[str] = set()
+        for target in payload["targets"]:
+            if (
+                isinstance(target, dict)
+                and target.get("provider_id") == provider.id
+                and target.get("model") == requested
+            ):
+                target["model"] = selection.resolved_model
+                if selection.reasoning_effort is not None:
+                    efforts = target.get("reasoning_efforts")
+                    if (
+                        isinstance(efforts, list)
+                        and selection.reasoning_effort not in efforts
+                    ):
+                        efforts.append(selection.reasoning_effort)
+                target_id = target.get("id")
+                if isinstance(target_id, str):
+                    selected_target_ids.add(target_id)
+        selected_pool_ids = {
+            pool.get("id")
+            for pool in payload["pools"]
+            if isinstance(pool, dict)
+            and isinstance(pool.get("targets"), list)
+            and selected_target_ids.intersection(pool["targets"])
+        }
         for agent in payload["agents"]:
-            if isinstance(agent, dict) and agent.get("provider") == provider.id:
-                agent["model"] = selection.resolved_model
+            if (
+                isinstance(agent, dict)
+                and agent.get("pool_id") in selected_pool_ids
+            ):
                 agent["reasoning_effort"] = selection.reasoning_effort
         selected_catalog = Catalog.from_dict(payload)
         gate = self._compatibility_gate(self.codex_bin, self.paths.home, selection)
@@ -777,6 +809,24 @@ class RelayManager:
             providers = payload["providers"]
             assert isinstance(providers, list)
             providers.append(selected.to_dict())
+            if selected.auth_mode == "vault":
+                credentials = payload["credentials"]
+                assert isinstance(credentials, list)
+                credentials.append(
+                    {
+                        "id": "primary",
+                        "provider_id": selected.id,
+                        "vault_target": credential_target(
+                            selected.id,
+                            selected.protocol,
+                        ),
+                        "enabled": True,
+                        "created_at": datetime.now(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        "label": "Primary",
+                    }
+                )
             return Catalog.from_dict(payload)
 
         return self._mutate_catalog("provider-add", mutate)
@@ -792,11 +842,20 @@ class RelayManager:
         def mutate(catalog: Catalog) -> Catalog:
             provider = catalog.provider(provider_id)
             users = [item.name for item in catalog.agents if item.provider == provider.id]
-            if users:
+            target_users = [
+                item.id
+                for item in catalog.targets
+                if item.provider_id == provider.id
+            ]
+            if users or target_users:
                 raise ManagerError(
                     "provider_in_use",
-                    f"Provider {provider.id} is still used by catalog agents.",
-                    {"provider": provider.id, "agents": users},
+                    f"Provider {provider.id} is still used by catalog routing.",
+                    {
+                        "provider": provider.id,
+                        "agents": users,
+                        "targets": target_users,
+                    },
                 )
             removed.append(provider)
             payload = catalog.to_dict()
@@ -806,6 +865,14 @@ class RelayManager:
                 item
                 for item in providers
                 if isinstance(item, dict) and item.get("id") != provider.id
+            ]
+            credentials = payload["credentials"]
+            assert isinstance(credentials, list)
+            payload["credentials"] = [
+                item
+                for item in credentials
+                if isinstance(item, dict)
+                and item.get("provider_id") != provider.id
             ]
             return Catalog.from_dict(payload)
 
@@ -819,6 +886,168 @@ class RelayManager:
 
         def mutate(catalog: Catalog) -> Catalog:
             payload = catalog.to_dict()
+            selected_payload = selected.to_dict()
+            if selected.provider:
+                provider = catalog.provider(selected.provider)
+                enabled_credentials = sorted(
+                    (
+                        item
+                        for item in catalog.credentials
+                        if item.provider_id == provider.id and item.enabled
+                    ),
+                    key=lambda item: item.id,
+                )
+                credential_id = (
+                    enabled_credentials[0].id
+                    if len(enabled_credentials) == 1
+                    else None
+                )
+                if provider.auth_mode == "vault":
+                    if not enabled_credentials:
+                        raise ManagerError(
+                            "credential_required",
+                            f"Provider {provider.id} has no enabled credential reference.",
+                            {"provider": provider.id},
+                        )
+                    if len(enabled_credentials) > 1:
+                        raise ManagerError(
+                            "ambiguous_credential",
+                            f"Provider {provider.id} has multiple enabled credentials; select an execution target explicitly.",
+                            {"provider": provider.id},
+                        )
+                target_id = f"{selected.name}-target"
+                pool_id = f"{selected.name}-pool"
+                targets = payload["targets"]
+                pools = payload["pools"]
+                assert isinstance(targets, list)
+                assert isinstance(pools, list)
+                existing_agent = next(
+                    (
+                        item
+                        for item in catalog.agents
+                        if item.name.casefold() == selected.name.casefold()
+                    ),
+                    None,
+                )
+                existing_pool = next(
+                    (item for item in catalog.pools if item.id == pool_id),
+                    None,
+                )
+                if existing_pool is not None:
+                    other_agent_users = [
+                        item.name
+                        for item in catalog.agents
+                        if item.name.casefold() != selected.name.casefold()
+                        and (
+                            item.pool_id == pool_id
+                            or item.fallback_pool_id == pool_id
+                        )
+                    ]
+                    host_users = [
+                        item.host
+                        for item in catalog.hosts.values()
+                        if item.default_pool == pool_id
+                    ]
+                    if (
+                        existing_agent is None
+                        or existing_agent.pool_id != pool_id
+                        or existing_pool.targets != (target_id,)
+                        or other_agent_users
+                        or host_users
+                    ):
+                        raise ManagerError(
+                            "routing_in_use",
+                            f"Pool {pool_id} is shared and cannot be replaced by the legacy agent command.",
+                            {
+                                "pool": pool_id,
+                                "agents": other_agent_users,
+                                "hosts": host_users,
+                            },
+                        )
+                existing_target = next(
+                    (
+                        item
+                        for item in catalog.targets
+                        if item.id == target_id
+                    ),
+                    None,
+                )
+                if existing_target is not None:
+                    other_pool_users = [
+                        item.id
+                        for item in catalog.pools
+                        if item.id != pool_id and target_id in item.targets
+                    ]
+                    if existing_pool is None or other_pool_users:
+                        raise ManagerError(
+                            "routing_in_use",
+                            f"Target {target_id} is shared and cannot be replaced by the legacy agent command.",
+                            {
+                                "target": target_id,
+                                "pools": other_pool_users,
+                            },
+                        )
+                payload["targets"] = [
+                    item
+                    for item in targets
+                    if not (
+                        isinstance(item, dict)
+                        and item.get("id") == target_id
+                    )
+                ] + [
+                    {
+                        "id": target_id,
+                        "provider_id": provider.id,
+                        "protocol": None,
+                        "model": selected.model,
+                        "credential_id": credential_id,
+                        "capabilities": sorted(
+                            selected.required_capabilities
+                        ),
+                        "context_window": (
+                            selected.context_window
+                            or provider.context_window
+                        ),
+                        "max_output_tokens": None,
+                        "reasoning_efforts": (
+                            [selected.reasoning_effort]
+                            if selected.reasoning_effort is not None
+                            else []
+                        ),
+                        "trust": selected.trust,
+                        "host_compatibility": list(selected.hosts),
+                        "enabled": True,
+                        "metadata": {"managed_for_agent": selected.name},
+                    }
+                ]
+                payload["pools"] = [
+                    item
+                    for item in pools
+                    if not (
+                        isinstance(item, dict)
+                        and item.get("id") == pool_id
+                    )
+                ] + [
+                    {
+                        "id": pool_id,
+                        "targets": [target_id],
+                        "strategy": "sticky",
+                        "duration_seconds": None,
+                        "max_rate_limit_wait_seconds": 30,
+                        "cooldown": {
+                            "quota_seconds": 86400,
+                            "rate_limit_seconds": 60,
+                            "auth_seconds": 3600,
+                            "provider_seconds": 30,
+                        },
+                        "required_capabilities": sorted(
+                            selected.required_capabilities
+                        ),
+                        "host_compatibility": list(selected.hosts),
+                        "enabled": True,
+                    }
+                ]
+                selected_payload["pool_id"] = pool_id
             current_agents = payload["agents"]
             assert isinstance(current_agents, list)
             agents = [
@@ -827,7 +1056,7 @@ class RelayManager:
                 if isinstance(item, dict)
                 and str(item.get("name", "")).casefold() != selected.name.casefold()
             ]
-            agents.append(selected.to_dict())
+            agents.append(selected_payload)
             payload["agents"] = agents
             return Catalog.from_dict(payload)
 
@@ -844,6 +1073,49 @@ class RelayManager:
                 for item in current_agents
                 if isinstance(item, dict) and item.get("name") != selected.name
             ]
+            remaining_agents = payload["agents"]
+            assert isinstance(remaining_agents, list)
+            pool_still_used = any(
+                isinstance(item, dict)
+                and (
+                    item.get("pool_id") == selected.pool_id
+                    or item.get("fallback_pool_id") == selected.pool_id
+                )
+                for item in remaining_agents
+            )
+            host_uses_pool = any(
+                host.default_pool == selected.pool_id
+                for host in catalog.hosts.values()
+            )
+            if not pool_still_used and not host_uses_pool:
+                removed_pool = catalog.pool(selected.pool_id)
+                candidate_targets = set(removed_pool.targets)
+                pools = payload["pools"]
+                assert isinstance(pools, list)
+                payload["pools"] = [
+                    item
+                    for item in pools
+                    if not (
+                        isinstance(item, dict)
+                        and item.get("id") == selected.pool_id
+                    )
+                ]
+                referenced_targets = {
+                    target_id
+                    for item in payload["pools"]
+                    if isinstance(item, dict)
+                    for target_id in item.get("targets", [])
+                    if isinstance(target_id, str)
+                }
+                targets = payload["targets"]
+                assert isinstance(targets, list)
+                payload["targets"] = [
+                    item
+                    for item in targets
+                    if not isinstance(item, dict)
+                    or item.get("id") not in candidate_targets
+                    or item.get("id") in referenced_targets
+                ]
             return Catalog.from_dict(payload)
 
         return self._mutate_catalog("agent-remove", mutate)

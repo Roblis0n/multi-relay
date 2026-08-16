@@ -15,6 +15,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from multi_relay import ManagerError, Paths, resolve_paths  # noqa: E402
+from multi_relay.catalog import load_catalog  # noqa: E402
 from multi_relay.compatibility import CompatibilityReport  # noqa: E402
 from multi_relay.instructions import INSTRUCTIONS_BEGIN  # noqa: E402
 from multi_relay.manager import RelayManager  # noqa: E402
@@ -93,7 +94,7 @@ class ManagerTests(unittest.TestCase):
 
         def discover(secret: str) -> str:
             timeline.append("discover")
-            return "deepseek-v4-pro"
+            return self.selection.resolved_model
 
         def resolve(model: str) -> ModelSelection:
             timeline.append("effort")
@@ -223,6 +224,12 @@ class ManagerTests(unittest.TestCase):
 
     def test_setup_gates_before_writes_then_installs_all_builtin_roles(self) -> None:
         events: list[str] = []
+        self.selection = ModelSelection(
+            requested_model="deepseek-v4-pro",
+            resolved_model="deepseek-discovered-model",
+            reasoning_effort="low",
+            effort_source="empirical_codex_provider_probe",
+        )
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             original = (
@@ -261,6 +268,25 @@ class ManagerTests(unittest.TestCase):
                 {"provider_initialized": True},
             )
             self.assertTrue(all(manifest["compatibility"].values()))
+            catalog = load_catalog(
+                home / "codex-multi-relay" / "catalog.json"
+            )
+            self.assertEqual(
+                {
+                    item.model
+                    for item in catalog.targets
+                    if item.provider_id == "deepseek"
+                },
+                {"deepseek-discovered-model"},
+            )
+            self.assertEqual(
+                {
+                    item.reasoning_effort
+                    for item in catalog.agents
+                    if item.provider == "deepseek"
+                },
+                {"low"},
+            )
 
     def test_status_rejects_a_v2_concurrency_cap_below_eight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

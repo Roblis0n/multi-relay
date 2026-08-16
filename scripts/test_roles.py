@@ -101,11 +101,32 @@ class RoleRenderingTests(unittest.TestCase):
 
     def test_catalog_agents_render_provider_mcp_skill_and_sandbox_overrides(self) -> None:
         payload = default_catalog("native").to_dict()
-        payload["agents"][0].update(
+        payload["targets"][0].update(
             {
                 "model": "gpt-example",
+                "capabilities": [
+                    "text",
+                    "vision",
+                    "audio",
+                    "tool_calling",
+                    "server_web_search",
+                ],
+                "reasoning_efforts": ["high"],
+            }
+        )
+        payload["pools"][0]["required_capabilities"] = [
+            "text",
+            "tool_calling",
+            "server_web_search",
+        ]
+        payload["agents"][0].update(
+            {
                 "reasoning_effort": "high",
-                "capabilities": ["text", "tools", "web"],
+                "required_capabilities": [
+                    "text",
+                    "tool_calling",
+                    "server_web_search",
+                ],
                 "mcp_servers": {
                     "docs": {
                         "url": "https://developers.openai.com/mcp",

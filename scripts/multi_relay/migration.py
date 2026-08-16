@@ -30,7 +30,7 @@ class LegacyMigration:
 
 
 def catalog_from_schema4(manifest: dict[str, Any]) -> Catalog:
-    """Convert the former single-provider manifest into a schema-1 catalog."""
+    """Convert the former single-provider manifest into a schema 2 catalog."""
 
     if manifest.get("schema_version") != 4:
         raise ManagerError("invalid_manifest", "A schema-4 Relay manifest is required.")
@@ -48,9 +48,26 @@ def catalog_from_schema4(manifest: dict[str, Any]) -> Catalog:
         raise ManagerError("invalid_manifest", "The legacy concurrency value is invalid.")
     payload = default_catalog("hybrid").to_dict()
     payload["concurrency"] = concurrency
+    deepseek_targets: set[str] = set()
+    for target in payload["targets"]:
+        if isinstance(target, dict) and target.get("provider_id") == "deepseek":
+            target["model"] = model
+            if effort is not None:
+                efforts = target.get("reasoning_efforts")
+                if isinstance(efforts, list) and effort not in efforts:
+                    efforts.append(effort)
+            target_id = target.get("id")
+            if isinstance(target_id, str):
+                deepseek_targets.add(target_id)
+    deepseek_pools = {
+        pool.get("id")
+        for pool in payload["pools"]
+        if isinstance(pool, dict)
+        and isinstance(pool.get("targets"), list)
+        and deepseek_targets.intersection(pool["targets"])
+    }
     for agent in payload["agents"]:
-        if isinstance(agent, dict) and agent.get("provider") == "deepseek":
-            agent["model"] = model
+        if isinstance(agent, dict) and agent.get("pool_id") in deepseek_pools:
             agent["reasoning_effort"] = effort
     return Catalog.from_dict(payload)
 

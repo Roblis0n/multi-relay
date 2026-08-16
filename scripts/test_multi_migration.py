@@ -15,9 +15,15 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from multi_relay import ManagerError, resolve_paths  # noqa: E402
-from multi_relay.catalog import default_catalog, load_catalog  # noqa: E402
+from multi_relay.catalog import (  # noqa: E402
+    Catalog,
+    default_catalog,
+    load_catalog,
+    save_catalog_bytes,
+)
 from multi_relay.compatibility import CompatibilityReport  # noqa: E402
 from multi_relay.manager import RelayManager, SCHEMA_VERSION  # noqa: E402
+from multi_relay.migration import catalog_from_schema4  # noqa: E402
 from multi_relay.model_capabilities import ModelSelection  # noqa: E402
 from multi_relay.roles import expected_agent_files  # noqa: E402
 
@@ -96,6 +102,34 @@ class MultiRelayMigrationTests(unittest.TestCase):
             or report(selection),
             bridge_stopper=lambda: True,
         )
+
+    def test_schema4_catalog_migration_preserves_model_and_effort(self) -> None:
+        catalog = catalog_from_schema4(
+            {
+                "schema_version": 4,
+                "selection": {
+                    "resolved_model": "deepseek-migrated-model",
+                    "reasoning_effort": "low",
+                },
+                "concurrency": 11,
+            }
+        )
+
+        deepseek_targets = [
+            item for item in catalog.targets if item.provider_id == "deepseek"
+        ]
+        deepseek_agents = [
+            item for item in catalog.agents if item.provider == "deepseek"
+        ]
+        self.assertEqual(
+            {item.model for item in deepseek_targets},
+            {"deepseek-migrated-model"},
+        )
+        self.assertEqual(
+            {item.reasoning_effort for item in deepseek_agents},
+            {"low"},
+        )
+        self.assertEqual(catalog.concurrency, 11)
 
     def test_paths_use_new_state_and_keep_both_legacy_locations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -323,6 +357,125 @@ class MultiRelayMigrationTests(unittest.TestCase):
                     {},
                 ),
             )
+
+    def test_remove_agent_preserves_unrelated_unpooled_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "config.toml").write_text(
+                'model = "gpt-parent"\n',
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+            manager.setup(preset="native")
+            manager.add_provider(
+                {
+                    "id": "vendor",
+                    "name": "Vendor",
+                    "protocol": "responses-compatible",
+                    "base_url": "https://api.vendor.test/v1",
+                    "auth": "none",
+                    "capabilities": ["text", "tools"],
+                    "context_window": 64000,
+                    "enabled": True,
+                }
+            )
+            manager.set_agent(
+                {
+                    "name": "vendor-worker",
+                    "description": "Vendor worker.",
+                    "provider": "vendor",
+                    "model": "vendor-model",
+                    "reasoning_effort": None,
+                    "context_window": 64000,
+                    "capabilities": ["text", "tools"],
+                    "trust": "standard",
+                    "priority": 5,
+                    "sandbox_mode": "workspace-write",
+                    "mcp_servers": {},
+                    "skills": [],
+                    "developer_instructions": "Implement the bounded task.",
+                }
+            )
+            payload = load_catalog(manager.paths.catalog).to_dict()
+            reserved = {
+                **next(
+                    item
+                    for item in payload["targets"]
+                    if item["provider_id"] == "vendor"
+                ),
+                "id": "reserved-target",
+                "metadata": {"purpose": "reserved"},
+            }
+            payload["targets"].append(reserved)
+            manager.paths.catalog.write_bytes(
+                save_catalog_bytes(Catalog.from_dict(payload))
+            )
+
+            manager.remove_agent("vendor-worker")
+            remaining = load_catalog(manager.paths.catalog)
+
+        self.assertIn(
+            "reserved-target",
+            {item.id for item in remaining.targets},
+        )
+
+    def test_legacy_agent_set_refuses_to_overwrite_shared_pool(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / "config.toml").write_text(
+                'model = "gpt-parent"\n',
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+            manager.setup(preset="native")
+            manager.add_provider(
+                {
+                    "id": "vendor",
+                    "name": "Vendor",
+                    "protocol": "responses-compatible",
+                    "base_url": "https://api.vendor.test/v1",
+                    "auth": "none",
+                    "capabilities": ["text", "tools"],
+                    "context_window": 64000,
+                    "enabled": True,
+                }
+            )
+            legacy_agent = {
+                "name": "vendor-worker",
+                "description": "Vendor worker.",
+                "provider": "vendor",
+                "model": "vendor-model",
+                "reasoning_effort": None,
+                "context_window": 64000,
+                "capabilities": ["text", "tools"],
+                "trust": "standard",
+                "priority": 5,
+                "sandbox_mode": "workspace-write",
+                "mcp_servers": {},
+                "skills": [],
+                "developer_instructions": "Implement the bounded task.",
+            }
+            manager.set_agent(legacy_agent)
+            payload = load_catalog(manager.paths.catalog).to_dict()
+            shared = {
+                **next(
+                    item
+                    for item in payload["agents"]
+                    if item["name"] == "vendor-worker"
+                ),
+                "name": "observer",
+                "description": "Shared-pool observer.",
+            }
+            payload["agents"].append(shared)
+            manager.paths.catalog.write_bytes(
+                save_catalog_bytes(Catalog.from_dict(payload))
+            )
+            replacement = {**legacy_agent, "model": "replacement-model"}
+
+            with self.assertRaises(ManagerError) as raised:
+                manager.set_agent(replacement)
+
+        self.assertEqual(raised.exception.code, "routing_in_use")
 
     def test_setup_is_idempotent_and_preserves_a_custom_schema5_catalog(self) -> None:
         events: list[str] = []
