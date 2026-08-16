@@ -25,6 +25,7 @@ class Paths:
     legacy_manifest: Path
     product_state_dir: Path
     runtime_state: Path
+    runtime_state_lock: Path
     gateway_state: Path
 
 
@@ -74,5 +75,6 @@ def resolve_paths(
         legacy_manifest=legacy_state_dir / "manifest.json",
         product_state_dir=product_state_dir,
         runtime_state=product_state_dir / "runtime-state.json",
+        runtime_state_lock=product_state_dir / "runtime-state.lock",
         gateway_state=product_state_dir / "gateway-state.json",
     )
