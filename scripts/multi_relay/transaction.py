@@ -8,9 +8,9 @@ import os
 import tempfile
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator, Mapping
 
 from .errors import ManagerError
 
@@ -33,10 +33,13 @@ else:
 
 @dataclass(frozen=True)
 class InstallPlan:
+    """A recoverable mutation set with best-effort content preconditions."""
+
     files: dict[Path, bytes]
     removals: tuple[Path, ...]
     manifest: dict[str, Any] | None
     backup_dir: Path
+    preconditions: dict[Path, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,21 @@ class FileSnapshot:
 class TransactionResult:
     snapshots: tuple[FileSnapshot, ...]
     backup_dir: Path
+
+
+def transaction_target_paths(
+    files: Mapping[Path, bytes],
+    removals: Iterable[Path],
+    manifest_path: Path,
+) -> tuple[Path, ...]:
+    """Return the canonical target order used by snapshots and backup filenames."""
+
+    return tuple(
+        sorted(
+            set(files).union(removals).union({manifest_path}),
+            key=str,
+        )
+    )
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
@@ -144,7 +162,14 @@ def execute_install_plan(
 
     if manifest_path in plan.files or manifest_path in plan.removals:
         raise ManagerError("invalid_plan", "The manifest is managed separately from plan targets.")
-    targets = tuple(sorted(set(plan.files).union(plan.removals).union({manifest_path}), key=str))
+    targets = transaction_target_paths(plan.files, plan.removals, manifest_path)
+    unknown_preconditions = set(plan.preconditions) - set(targets)
+    if unknown_preconditions:
+        raise ManagerError(
+            "invalid_plan",
+            "Transaction preconditions must reference transaction targets.",
+            {"paths": [str(path) for path in sorted(unknown_preconditions, key=str)]},
+        )
     snapshots = tuple(_snapshot(path) for path in targets)
     try:
         _write_backup(plan.backup_dir, snapshots)
@@ -153,6 +178,22 @@ def execute_install_plan(
             "backup_failed",
             "Could not create the pre-install backup.",
         ) from None
+
+    for path, expected in sorted(plan.preconditions.items(), key=lambda item: str(item[0])):
+        try:
+            current = path.read_bytes()
+        except OSError:
+            current = None
+        if (
+            not isinstance(expected, str)
+            or current is None
+            or hashlib.sha256(current).hexdigest() != expected
+        ):
+            raise ManagerError(
+                "transaction_precondition_failed",
+                "A managed file changed after backup and before replacement; no install writes were made.",
+                {"path": str(path), "backup": str(plan.backup_dir)},
+            )
 
     try:
         for path in sorted(plan.removals, key=str):

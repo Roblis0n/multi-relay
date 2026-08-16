@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
-from .catalog import Catalog, default_catalog
+from .catalog import (
+    CATALOG_SCHEMA_VERSION,
+    LEGACY_CATALOG_SCHEMA_VERSION,
+    Catalog,
+    default_catalog,
+    legacy_catalog_to_schema2_dict,
+    save_catalog_bytes,
+)
 from .errors import ManagerError
 from .paths import Paths
 from .toml_config import _remove_table_key, _set_table_value
+from .transaction import atomic_write
 
 
 LEGACY_PROVIDER_BEGIN = "# BEGIN CODEX-DEEPSEEK-SUBAGENT PROVIDER"
@@ -27,6 +37,205 @@ class LegacyMigration:
     config_text: str
     files: dict[Path, bytes]
     removals: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class CatalogMigrationResult:
+    """Validated catalog plus the provenance of the bytes that produced it."""
+
+    catalog: Catalog
+    source_schema: int
+    source_sha256: str
+    changed: bool
+    backup_path: Path | None
+
+
+CatalogWriter = Callable[[Path, bytes, int], None]
+
+
+def migrate_catalog_1_to_2(value: Mapping[str, Any] | Catalog) -> Catalog:
+    """Pure, deterministic schema 1 migration; schema 2 input is idempotent."""
+
+    if isinstance(value, Catalog):
+        return Catalog.from_dict(value.to_dict())
+    if not isinstance(value, Mapping):
+        raise ManagerError("catalog_invalid", "Catalog must be a JSON object.")
+    schema = value.get("schema_version")
+    if schema == LEGACY_CATALOG_SCHEMA_VERSION and not isinstance(schema, bool):
+        return Catalog.from_dict(legacy_catalog_to_schema2_dict(value))
+    if schema == CATALOG_SCHEMA_VERSION and not isinstance(schema, bool):
+        return Catalog.from_dict(value)
+    return Catalog.from_dict(value)
+
+
+def _read_catalog_candidate(path: Path) -> tuple[bytes, CatalogMigrationResult]:
+    try:
+        raw = path.read_bytes()
+        decoded = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ManagerError(
+            "catalog_invalid",
+            "Catalog JSON could not be read or decoded; fix the catalog before retrying migration.",
+            {"path": str(path)},
+        ) from exc
+    if not isinstance(decoded, Mapping):
+        raise ManagerError(
+            "catalog_invalid",
+            "Catalog must be a JSON object; fix the catalog before retrying migration.",
+            {"path": str(path)},
+        )
+    schema = decoded.get("schema_version")
+    if isinstance(schema, bool) or not isinstance(schema, int):
+        raise ManagerError(
+            "unsupported_catalog_schema",
+            "Catalog schema_version must be an integer.",
+            {"path": str(path), "schema_version": schema},
+        )
+    catalog = migrate_catalog_1_to_2(decoded)
+    return raw, CatalogMigrationResult(
+        catalog=catalog,
+        source_schema=schema,
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+        changed=schema == LEGACY_CATALOG_SCHEMA_VERSION,
+        backup_path=None,
+    )
+
+
+def inspect_catalog_migration(path: Path) -> CatalogMigrationResult:
+    """Read and validate a catalog without changing it."""
+
+    _, result = _read_catalog_candidate(path)
+    return result
+
+
+def migrate_catalog_file(
+    path: Path,
+    backup_root: Path,
+    *,
+    catalog_writer: CatalogWriter = atomic_write,
+) -> CatalogMigrationResult:
+    """Migrate one standalone catalog; manager callers use a multi-file transaction."""
+
+    source = path.expanduser().resolve()
+    backup_directory = backup_root.expanduser().resolve()
+    raw, candidate = _read_catalog_candidate(source)
+    try:
+        source_mode = source.stat().st_mode & 0o777
+    except OSError as exc:
+        raise ManagerError(
+            "catalog_invalid",
+            "Catalog metadata could not be read; fix file access before retrying migration.",
+            {"path": str(source)},
+        ) from exc
+    if not candidate.changed:
+        return candidate
+
+    catalog_bytes = save_catalog_bytes(candidate.catalog)
+    # Validate the exact bytes before any backup or source-file write occurs.
+    try:
+        Catalog.from_dict(json.loads(catalog_bytes.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError, ManagerError) as exc:
+        raise ManagerError(
+            "catalog_migration_failed",
+            "The migrated catalog did not pass validation; the original catalog was not changed.",
+            {"path": str(source)},
+        ) from exc
+
+    backup = backup_directory / (
+        f"{source.stem}.schema1.{candidate.source_sha256}.json"
+    )
+    if backup == source:
+        raise ManagerError(
+            "catalog_backup_failed",
+            "The catalog backup path must differ from the source catalog.",
+            {"path": str(source)},
+        )
+    backup_created = False
+    try:
+        if backup.exists():
+            if not backup.is_file() or backup.read_bytes() != raw:
+                raise OSError("existing migration backup does not match source")
+        else:
+            atomic_write(backup, raw, 0o600)
+            backup_created = True
+        if backup.read_bytes() != raw:
+            raise OSError("migration backup verification failed")
+    except Exception as exc:
+        raise ManagerError(
+            "catalog_backup_failed",
+            "The original catalog could not be backed up; the source catalog was not changed.",
+            {"path": str(source), "backup": str(backup)},
+        ) from exc
+
+    descriptor, staged_name = tempfile.mkstemp(
+        prefix=f".{source.name}.migration.",
+        dir=source.parent,
+    )
+    os.close(descriptor)
+    staged = Path(staged_name)
+    try:
+        catalog_writer(staged, catalog_bytes, source_mode)
+        if staged.read_bytes() != catalog_bytes:
+            raise OSError("staged catalog verification failed")
+        try:
+            source_unchanged = source.read_bytes() == raw
+        except OSError:
+            source_unchanged = False
+        if not source_unchanged:
+            if backup_created:
+                try:
+                    backup.unlink()
+                except OSError:
+                    pass
+            raise ManagerError(
+                "catalog_changed",
+                "The catalog changed while its migration candidate was being prepared; retry the migration.",
+                {"path": str(source)},
+            )
+        os.replace(staged, source)
+        os.chmod(source, source_mode)
+        if source.read_bytes() != catalog_bytes:
+            raise OSError("catalog post-write verification failed")
+    except ManagerError as exc:
+        if exc.code == "catalog_changed":
+            raise
+        raise ManagerError(
+            "catalog_migration_failed",
+            "Catalog migration could not stage its replacement; the original catalog remains unchanged.",
+            {"path": str(source), "backup": str(backup)},
+        ) from exc
+    except Exception as exc:
+        try:
+            current = source.read_bytes() if source.is_file() else None
+            if current == catalog_bytes:
+                atomic_write(source, raw, source_mode)
+                current = source.read_bytes()
+            if current != raw:
+                raise OSError("catalog changed outside the staged migration")
+        except OSError as rollback_exc:
+            raise ManagerError(
+                "catalog_migration_rollback_failed",
+                "Catalog migration failed and the source no longer matches the migration pre-state; recover from the verified backup without overwriting newer data.",
+                {"path": str(source), "backup": str(backup)},
+            ) from rollback_exc
+        raise ManagerError(
+            "catalog_migration_failed",
+            "Catalog migration could not be written; the original catalog remains unchanged.",
+            {"path": str(source), "backup": str(backup)},
+        ) from exc
+    finally:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
+
+    return CatalogMigrationResult(
+        catalog=candidate.catalog,
+        source_schema=candidate.source_schema,
+        source_sha256=candidate.source_sha256,
+        changed=True,
+        backup_path=backup,
+    )
 
 
 def catalog_from_schema4(manifest: dict[str, Any]) -> Catalog:

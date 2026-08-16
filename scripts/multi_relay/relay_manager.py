@@ -37,7 +37,13 @@ from .instructions import (
     apply_fanout_instructions,
     remove_fanout_instructions,
 )
-from .migration import LegacyMigration, catalog_from_schema4, plan_legacy_migration
+from .migration import (
+    CatalogMigrationResult,
+    LegacyMigration,
+    catalog_from_schema4,
+    inspect_catalog_migration,
+    plan_legacy_migration,
+)
 from .model_capabilities import ModelSelection
 from .native_test import native_acceptance_report
 from .paths import Paths
@@ -53,10 +59,12 @@ from .toml_config import (
 )
 from .transaction import (
     InstallPlan,
+    TransactionResult,
     atomic_write,
     execute_install_plan,
     operation_lock,
     rollback_transaction,
+    transaction_target_paths,
 )
 
 
@@ -509,7 +517,70 @@ class RelayManager:
         }
         if selection is not None:
             payload["selection"] = asdict(selection)
+        for key in (
+            "catalog_source_schema",
+            "catalog_source_sha256",
+            "catalog_migration_backup",
+        ):
+            if key in previous:
+                payload[key] = previous[key]
         return payload
+
+    def _record_catalog_migration(
+        self,
+        manifest: dict[str, Any],
+        files: dict[Path, bytes],
+        removals: list[Path] | tuple[Path, ...],
+        backup_dir: Path,
+        migration: CatalogMigrationResult | None,
+        source: Path | None,
+    ) -> Path | None:
+        if migration is None or not migration.changed:
+            return None
+        migration_source = source or self.paths.catalog
+        transaction_targets = transaction_target_paths(
+            files,
+            removals,
+            self.paths.manifest,
+        )
+        try:
+            source_index = transaction_targets.index(migration_source)
+        except ValueError:
+            raise ManagerError(
+                "catalog_migration_failed",
+                "The schema 1 catalog was not included in the migration transaction.",
+                {"path": str(migration_source)},
+            ) from None
+        migration_backup = backup_dir / f"{source_index:04d}.bin"
+        manifest["catalog_source_schema"] = migration.source_schema
+        manifest["catalog_source_sha256"] = migration.source_sha256
+        manifest["catalog_migration_backup"] = str(migration_backup)
+        return migration_backup
+
+    @staticmethod
+    def _verify_catalog_migration_backup(
+        transaction: TransactionResult,
+        migration: CatalogMigrationResult | None,
+        backup: Path | None,
+    ) -> None:
+        if migration is None or not migration.changed or backup is None:
+            return
+        try:
+            backup_hash = _sha256(backup.read_bytes())
+        except OSError:
+            rollback_transaction(transaction)
+            raise ManagerError(
+                "catalog_backup_failed",
+                "The schema 1 catalog backup could not be verified; the previous state was restored.",
+                {"backup": str(backup)},
+            ) from None
+        if backup_hash != migration.source_sha256:
+            rollback_transaction(transaction)
+            raise ManagerError(
+                "catalog_backup_failed",
+                "The schema 1 catalog backup did not match its source; the previous state was restored.",
+                {"backup": str(backup)},
+            )
 
     def _install_catalog_locked(
         self,
@@ -524,6 +595,8 @@ class RelayManager:
         selection: ModelSelection | None = None,
         gate: CompatibilityReport | None = None,
         run_live: bool = False,
+        catalog_migration: CatalogMigrationResult | None = None,
+        catalog_migration_source: Path | None = None,
     ) -> dict[str, Any]:
         installation_status = (
             "disabled" if previous_manifest.get("status") == "disabled" else "enabled"
@@ -611,14 +684,37 @@ class RelayManager:
             elif self.paths.instruction_file.exists():
                 removals.append(self.paths.instruction_file)
         removals.extend(self._adoption_removals(manifest_source))
+        backup_dir = self._backup_dir(operation)
+        migration_backup = self._record_catalog_migration(
+            manifest,
+            files,
+            removals,
+            backup_dir,
+            catalog_migration,
+            catalog_migration_source,
+        )
         transaction = execute_install_plan(
             InstallPlan(
                 files=files,
                 removals=tuple(dict.fromkeys(removals)),
                 manifest=manifest,
-                backup_dir=self._backup_dir(operation),
+                backup_dir=backup_dir,
+                preconditions=(
+                    {
+                        (
+                            catalog_migration_source or self.paths.catalog
+                        ): catalog_migration.source_sha256,
+                    }
+                    if catalog_migration is not None and catalog_migration.changed
+                    else {}
+                ),
             ),
             self.paths.manifest,
+        )
+        self._verify_catalog_migration_backup(
+            transaction,
+            catalog_migration,
+            migration_backup,
         )
         if enabled and run_live and selection is not None:
             try:
@@ -660,10 +756,17 @@ class RelayManager:
             self._reject_future_schema(previous)
             self._assert_no_unowned_managed_blocks(original_config, previous)
             migration: LegacyMigration | None = None
+            catalog_migration: CatalogMigrationResult | None = None
+            catalog_migration_source: Path | None = None
             working_config = original_config
             schema = previous.get("schema_version")
             if schema == SCHEMA_VERSION:
-                catalog = self._active_catalog(previous, source, require_owned=True)
+                catalog_migration, catalog_migration_source = self._active_catalog_result(
+                    previous,
+                    source,
+                    require_owned=True,
+                )
+                catalog = catalog_migration.catalog
             elif schema == 4:
                 catalog = catalog_from_schema4(previous)
             else:
@@ -698,7 +801,24 @@ class RelayManager:
                 selection=selection,
                 gate=gate,
                 run_live=selection is not None,
+                catalog_migration=catalog_migration,
+                catalog_migration_source=catalog_migration_source,
             )
+
+    def _active_catalog_result(
+        self,
+        manifest: dict[str, Any],
+        manifest_source: Path,
+        *,
+        require_owned: bool,
+    ) -> tuple[CatalogMigrationResult, Path]:
+        self._require_current_schema(manifest)
+        source = self._catalog_source(manifest_source)
+        if not source.is_file() and manifest_source != self.paths.manifest:
+            source = self.paths.catalog
+        if require_owned:
+            self._require_catalog_owned(manifest, source)
+        return inspect_catalog_migration(source), source
 
     def _active_catalog(
         self,
@@ -707,13 +827,12 @@ class RelayManager:
         *,
         require_owned: bool,
     ) -> Catalog:
-        self._require_current_schema(manifest)
-        source = self._catalog_source(manifest_source)
-        if not source.is_file() and manifest_source != self.paths.manifest:
-            source = self.paths.catalog
-        if require_owned:
-            self._require_catalog_owned(manifest, source)
-        return load_catalog(source)
+        result, _ = self._active_catalog_result(
+            manifest,
+            manifest_source,
+            require_owned=require_owned,
+        )
+        return result.catalog
 
     def _preserved_selection(
         self,
@@ -738,6 +857,8 @@ class RelayManager:
         source: Path,
         *,
         operation: str,
+        catalog_migration: CatalogMigrationResult | None = None,
+        catalog_migration_source: Path | None = None,
     ) -> dict[str, Any]:
         if not self.paths.config.is_file():
             raise ManagerError("config_missing", "Codex config.toml was not found.")
@@ -750,6 +871,8 @@ class RelayManager:
             previous_manifest=manifest,
             manifest_source=source,
             selection=self._preserved_selection(manifest, catalog),
+            catalog_migration=catalog_migration,
+            catalog_migration_source=catalog_migration_source,
         )
 
     def repair(self) -> dict[str, Any]:
@@ -763,8 +886,20 @@ class RelayManager:
             manifest, source = self._read_manifest()
             if not manifest:
                 raise ManagerError("not_configured", "Multi Relay is not installed.")
-            selected = catalog or self._active_catalog(manifest, source, require_owned=False)
-            return self._apply_catalog_locked(selected, manifest, source, operation="apply")
+            catalog_migration, catalog_source = self._active_catalog_result(
+                manifest,
+                source,
+                require_owned=False,
+            )
+            selected = catalog or catalog_migration.catalog
+            return self._apply_catalog_locked(
+                selected,
+                manifest,
+                source,
+                operation="apply",
+                catalog_migration=catalog_migration,
+                catalog_migration_source=catalog_source,
+            )
 
     def catalog(self) -> dict[str, object]:
         manifest, source = self._read_manifest()
@@ -787,12 +922,18 @@ class RelayManager:
             manifest, source = self._read_manifest()
             if not manifest:
                 raise ManagerError("not_configured", "Multi Relay is not installed.")
-            current = self._active_catalog(manifest, source, require_owned=False)
+            catalog_migration, catalog_source = self._active_catalog_result(
+                manifest,
+                source,
+                require_owned=False,
+            )
             return self._apply_catalog_locked(
-                mutation(current),
+                mutation(catalog_migration.catalog),
                 manifest,
                 source,
                 operation=operation,
+                catalog_migration=catalog_migration,
+                catalog_migration_source=catalog_source,
             )
 
     def add_provider(self, provider: ProviderSpec | dict[str, object]) -> dict[str, Any]:
@@ -1300,7 +1441,12 @@ class RelayManager:
             self._require_current_schema(manifest)
             if manifest.get("status") == "enabled":
                 return self.status()
-            catalog = self._active_catalog(manifest, source, require_owned=True)
+            catalog_migration, catalog_source = self._active_catalog_result(
+                manifest,
+                source,
+                require_owned=True,
+            )
+            catalog = catalog_migration.catalog
             desired = expected_agent_files(self.paths.agents_dir, catalog)
             self._assert_role_ownership(desired, manifest)
             instructions = (
@@ -1321,14 +1467,67 @@ class RelayManager:
             updated.pop("backup", None)
             updated.pop("transaction_targets", None)
             updated["status"] = "enabled"
-            execute_install_plan(
+            removals = list(self._adoption_removals(source))
+            if catalog_migration.changed:
+                catalog_bytes = save_catalog_bytes(catalog)
+                files[self.paths.catalog] = catalog_bytes
+                if catalog_source != self.paths.catalog and catalog_source not in removals:
+                    removals.append(catalog_source)
+                updated["catalog_schema_version"] = catalog.schema_version
+                updated["catalog_sha256"] = _sha256(catalog_bytes)
+                updated["concurrency"] = catalog.concurrency
+                updated["providers"] = [item.id for item in catalog.providers]
+                updated["agents"] = [item.name for item in catalog.agents]
+                managed = (
+                    dict(updated.get("managed_files"))
+                    if isinstance(updated.get("managed_files"), dict)
+                    else {}
+                )
+                old_catalog_key = self._relative(catalog_source)
+                managed.pop(old_catalog_key, None)
+                if catalog_source != self.paths.catalog:
+                    old_state_prefix = (
+                        self._relative(catalog_source.parent).rstrip("/") + "/"
+                    )
+                    managed = {
+                        key: value
+                        for key, value in managed.items()
+                        if not (
+                            isinstance(key, str)
+                            and key.startswith(old_state_prefix)
+                        )
+                    }
+                managed[self._relative(self.paths.catalog)] = _sha256(catalog_bytes)
+                for path, content in desired.items():
+                    managed[self._relative(path)] = _sha256(content)
+                updated["managed_files"] = managed
+            backup_dir = self._backup_dir("enable")
+            migration_backup = self._record_catalog_migration(
+                updated,
+                files,
+                removals,
+                backup_dir,
+                catalog_migration,
+                catalog_source,
+            )
+            transaction = execute_install_plan(
                 InstallPlan(
                     files=files,
-                    removals=self._adoption_removals(source),
+                    removals=tuple(dict.fromkeys(removals)),
                     manifest=updated,
-                    backup_dir=self._backup_dir("enable"),
+                    backup_dir=backup_dir,
+                    preconditions=(
+                        {catalog_source: catalog_migration.source_sha256}
+                        if catalog_migration.changed
+                        else {}
+                    ),
                 ),
                 self.paths.manifest,
+            )
+            self._verify_catalog_migration_backup(
+                transaction,
+                catalog_migration,
+                migration_backup,
             )
             return self.status()
 

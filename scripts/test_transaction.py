@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from multi_relay import ManagerError  # noqa: E402
+import multi_relay.transaction as transaction_module  # noqa: E402
 from multi_relay.transaction import (  # noqa: E402
     InstallPlan,
     atomic_write,
@@ -23,6 +26,50 @@ from multi_relay.transaction import (  # noqa: E402
 
 
 class TransactionTests(unittest.TestCase):
+    def test_precondition_change_after_backup_aborts_before_any_install_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.toml"
+            role = root / "agents" / "default.toml"
+            manifest = root / "state" / "manifest.json"
+            backup = root / "state" / "backups" / "precondition-race"
+            original = b"original-owner-bytes\n"
+            concurrent = b"concurrent-owner-bytes\n"
+            config.write_bytes(original)
+            real_write_backup = transaction_module._write_backup
+
+            def backup_then_change(path: Path, snapshots: object) -> None:
+                real_write_backup(path, snapshots)  # type: ignore[arg-type]
+                config.write_bytes(concurrent)
+
+            with patch.object(
+                transaction_module,
+                "_write_backup",
+                side_effect=backup_then_change,
+            ):
+                with self.assertRaises(ManagerError) as raised:
+                    execute_install_plan(
+                        InstallPlan(
+                            files={
+                                config: b"migrated-bytes\n",
+                                role: b"role-bytes\n",
+                            },
+                            removals=(),
+                            manifest={"schema_version": 5},
+                            backup_dir=backup,
+                            preconditions={
+                                config: hashlib.sha256(original).hexdigest(),
+                            },
+                        ),
+                        manifest,
+                    )
+
+            self.assertEqual(raised.exception.code, "transaction_precondition_failed")
+            self.assertEqual(config.read_bytes(), concurrent)
+            self.assertFalse(role.exists())
+            self.assertFalse(manifest.exists())
+            self.assertTrue((backup / "snapshot.json").is_file())
+
     def test_success_writes_manifest_last_and_keeps_recoverable_backup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

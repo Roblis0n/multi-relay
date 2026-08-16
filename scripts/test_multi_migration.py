@@ -9,6 +9,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -23,9 +24,13 @@ from multi_relay.catalog import (  # noqa: E402
 )
 from multi_relay.compatibility import CompatibilityReport  # noqa: E402
 from multi_relay.manager import RelayManager, SCHEMA_VERSION  # noqa: E402
-from multi_relay.migration import catalog_from_schema4  # noqa: E402
+from multi_relay.migration import (  # noqa: E402
+    catalog_from_schema4,
+    inspect_catalog_migration,
+)
 from multi_relay.model_capabilities import ModelSelection  # noqa: E402
 from multi_relay.roles import expected_agent_files  # noqa: E402
+from test_catalog_migration2 import legacy_catalog  # noqa: E402
 
 
 class FakeStore:
@@ -130,6 +135,195 @@ class MultiRelayMigrationTests(unittest.TestCase):
             {"low"},
         )
         self.assertEqual(catalog.concurrency, 11)
+
+    def test_manager_transaction_migrates_schema1_and_records_backup_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = resolve_paths(str(home))
+            (home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\n',
+                encoding="utf-8",
+            )
+            paths.state_dir.mkdir(parents=True)
+            old_bytes = json.dumps(
+                legacy_catalog(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            old_hash = hashlib.sha256(old_bytes).hexdigest()
+            paths.catalog.write_bytes(old_bytes)
+            paths.manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "catalog_schema_version": 1,
+                        "status": "disabled",
+                        "catalog_sha256": old_hash,
+                        "managed_files": {
+                            paths.catalog.relative_to(home).as_posix(): old_hash,
+                        },
+                        "original_values": {},
+                        "instruction_file_preexisted": False,
+                        "config_preexisted": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+
+            manager.setup()
+
+            migrated = load_catalog(paths.catalog)
+            manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            migration_backup = Path(manifest["catalog_migration_backup"])
+            self.assertEqual(migrated.schema_version, 2)
+            self.assertEqual(manifest["catalog_source_schema"], 1)
+            self.assertEqual(manifest["catalog_source_sha256"], old_hash)
+            self.assertTrue(migration_backup.is_file())
+            self.assertEqual(migration_backup.read_bytes(), old_bytes)
+
+            manager.setup()
+            repeated = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            self.assertEqual(
+                repeated["catalog_migration_backup"],
+                str(migration_backup),
+            )
+            self.assertEqual(repeated["catalog_source_sha256"], old_hash)
+
+    def test_apply_uses_one_schema1_read_for_catalog_and_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = resolve_paths(str(home))
+            (home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\n',
+                encoding="utf-8",
+            )
+            paths.state_dir.mkdir(parents=True)
+            old_bytes = json.dumps(
+                legacy_catalog(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            old_hash = hashlib.sha256(old_bytes).hexdigest()
+            paths.catalog.write_bytes(old_bytes)
+            paths.manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "catalog_schema_version": 1,
+                        "status": "disabled",
+                        "catalog_sha256": old_hash,
+                        "managed_files": {
+                            paths.catalog.relative_to(home).as_posix(): old_hash,
+                        },
+                        "original_values": {},
+                        "instruction_file_preexisted": False,
+                        "config_preexisted": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+
+            with patch(
+                "multi_relay.relay_manager.inspect_catalog_migration",
+                wraps=inspect_catalog_migration,
+            ) as inspected:
+                manager.apply()
+
+            self.assertEqual(inspected.call_count, 1)
+            self.assertEqual(load_catalog(paths.catalog).schema_version, 2)
+
+    def test_schema1_catalog_in_prior_state_directory_is_adopted_transactionally(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = resolve_paths(str(home))
+            (home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\n',
+                encoding="utf-8",
+            )
+            paths.relay_state_dir.mkdir(parents=True)
+            prior_catalog = paths.relay_state_dir / "catalog.json"
+            old_bytes = json.dumps(
+                legacy_catalog(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            old_hash = hashlib.sha256(old_bytes).hexdigest()
+            prior_catalog.write_bytes(old_bytes)
+            paths.relay_manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "catalog_schema_version": 1,
+                        "status": "disabled",
+                        "catalog_sha256": old_hash,
+                        "managed_files": {
+                            prior_catalog.relative_to(home).as_posix(): old_hash,
+                        },
+                        "original_values": {},
+                        "instruction_file_preexisted": False,
+                        "config_preexisted": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+
+            manager.setup()
+
+            manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            migration_backup = Path(manifest["catalog_migration_backup"])
+            self.assertEqual(load_catalog(paths.catalog).schema_version, 2)
+            self.assertEqual(migration_backup.read_bytes(), old_bytes)
+            self.assertFalse(prior_catalog.exists())
+            self.assertFalse(paths.relay_manifest.exists())
+
+    def test_enable_persists_schema1_migration_before_enabling_roles(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            paths = resolve_paths(str(home))
+            (home / "config.toml").write_text(
+                'model = "gpt-5.6-sol"\n',
+                encoding="utf-8",
+            )
+            paths.state_dir.mkdir(parents=True)
+            old_bytes = json.dumps(
+                legacy_catalog(),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            old_hash = hashlib.sha256(old_bytes).hexdigest()
+            paths.catalog.write_bytes(old_bytes)
+            paths.manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "catalog_schema_version": 1,
+                        "status": "disabled",
+                        "catalog_sha256": old_hash,
+                        "managed_files": {
+                            paths.catalog.relative_to(home).as_posix(): old_hash,
+                        },
+                        "original_values": {},
+                        "instruction_file_preexisted": False,
+                        "config_preexisted": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manager = self.manager(home)
+
+            manager.enable()
+
+            manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+            self.assertEqual(load_catalog(paths.catalog).schema_version, 2)
+            self.assertEqual(manifest["catalog_schema_version"], 2)
+            self.assertEqual(manifest["catalog_source_schema"], 1)
+            self.assertEqual(
+                Path(manifest["catalog_migration_backup"]).read_bytes(),
+                old_bytes,
+            )
 
     def test_paths_use_new_state_and_keep_both_legacy_locations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

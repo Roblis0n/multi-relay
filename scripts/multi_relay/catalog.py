@@ -1337,7 +1337,7 @@ class Catalog:
                 {"schema_version": schema_version},
             )
         if schema_version == LEGACY_CATALOG_SCHEMA_VERSION:
-            return cls._from_schema2_dict(_legacy_catalog_to_schema2_dict(value))
+            return cls._from_schema2_dict(legacy_catalog_to_schema2_dict(value))
         if schema_version != CATALOG_SCHEMA_VERSION:
             raise ManagerError(
                 "unsupported_catalog_schema",
@@ -1353,7 +1353,7 @@ class Catalog:
         if not isinstance(value, Mapping):
             raise _invalid("Legacy catalog must be a JSON object.")
         _assert_secret_free(value)
-        return cls._from_schema2_dict(_legacy_catalog_to_schema2_dict(value))
+        return cls._from_schema2_dict(legacy_catalog_to_schema2_dict(value))
 
     @classmethod
     def _from_schema2_dict(cls, value: object) -> "Catalog":
@@ -1663,6 +1663,8 @@ class Catalog:
         credential_id: str,
         provider_id: str | None = None,
     ) -> CredentialRef:
+        """Resolve a provider-scoped credential id, rejecting unscoped ambiguity."""
+
         matches = [
             item
             for item in self.credentials
@@ -1747,7 +1749,9 @@ def _target_identifier(
     return unique
 
 
-def _legacy_catalog_to_schema2_dict(value: object) -> dict[str, object]:
+def legacy_catalog_to_schema2_dict(value: object) -> dict[str, object]:
+    """Return the deterministic schema 2 representation of a schema 1 catalog."""
+
     data = _strict_mapping(value, _LEGACY_CATALOG_FIELDS, "Legacy catalog")
     schema = data["schema_version"]
     if (
@@ -1798,7 +1802,7 @@ def _legacy_catalog_to_schema2_dict(value: object) -> dict[str, object]:
     for provider in providers:
         if provider.auth_mode != "vault":
             continue
-        credential_id = f"{provider.id}-default"
+        credential_id = "primary"
         credential_by_provider[provider.id] = credential_id
         credentials.append(
             {
@@ -1811,11 +1815,8 @@ def _legacy_catalog_to_schema2_dict(value: object) -> dict[str, object]:
             }
         )
 
-    targets: list[dict[str, object]] = []
-    pools: list[dict[str, object]] = []
-    agents: list[dict[str, object]] = []
-    target_by_signature: dict[tuple[object, ...], str] = {}
-    used_target_ids: set[str] = set()
+    target_groups: dict[tuple[object, ...], dict[str, object]] = {}
+    agent_signatures: dict[str, tuple[object, ...]] = {}
     for agent in legacy_agents:
         provider = provider_map.get(agent.provider)
         if provider is None:
@@ -1847,49 +1848,89 @@ def _legacy_catalog_to_schema2_dict(value: object) -> dict[str, object]:
                 f"Agent {agent.name} context exceeds provider {provider.id}.",
                 {"agent": agent.name, "provider": provider.id},
             )
-        context_window = agent.context_window or provider.context_window
         credential_id = credential_by_provider.get(provider.id)
         signature: tuple[object, ...] = (
             provider.id,
             agent.model,
             credential_id,
             tuple(_capability_list(agent.required_capabilities)),
-            context_window,
-            agent.reasoning_effort,
-            agent.trust,
         )
-        target_id = target_by_signature.get(signature)
-        if target_id is None:
-            target_id = _target_identifier(
-                provider.id,
-                agent.model,
-                signature,
-                used_target_ids,
-            )
-            target_by_signature[signature] = target_id
-            targets.append(
-                {
-                    "id": target_id,
-                    "provider_id": provider.id,
-                    "protocol": None,
-                    "model": agent.model,
-                    "credential_id": credential_id,
-                    "capabilities": _capability_list(
-                        agent.required_capabilities
-                    ),
-                    "context_window": context_window,
-                    "max_output_tokens": None,
-                    "reasoning_efforts": (
-                        [agent.reasoning_effort]
-                        if agent.reasoning_effort is not None
-                        else []
-                    ),
-                    "trust": agent.trust,
-                    "host_compatibility": ["codex"],
-                    "enabled": True,
-                    "metadata": {"migrated_from_schema": 1},
-                }
-            )
+        agent_signatures[agent.name] = signature
+        group = target_groups.setdefault(
+            signature,
+            {
+                "provider": provider,
+                "model": agent.model,
+                "credential_id": credential_id,
+                "capabilities": agent.required_capabilities,
+                "contexts": [],
+                "reasoning_efforts": set(),
+                "high_trust": False,
+            },
+        )
+        if agent.context_window is not None:
+            contexts = group["contexts"]
+            assert isinstance(contexts, list)
+            contexts.append(agent.context_window)
+        if agent.reasoning_effort is not None:
+            efforts = group["reasoning_efforts"]
+            assert isinstance(efforts, set)
+            efforts.add(agent.reasoning_effort)
+        if agent.trust == "high":
+            group["high_trust"] = True
+
+    targets: list[dict[str, object]] = []
+    target_by_signature: dict[tuple[object, ...], str] = {}
+    used_target_ids: set[str] = set()
+    for signature in sorted(target_groups, key=repr):
+        group = target_groups[signature]
+        provider = group["provider"]
+        assert isinstance(provider, ProviderSpec)
+        model = group["model"]
+        assert model is None or isinstance(model, str)
+        target_id = _target_identifier(
+            provider.id,
+            model,
+            signature,
+            used_target_ids,
+        )
+        target_by_signature[signature] = target_id
+        contexts = group["contexts"]
+        assert isinstance(contexts, list)
+        efforts = group["reasoning_efforts"]
+        assert isinstance(efforts, set)
+        target_context = (
+            provider.context_window
+            if provider.context_window is not None
+            else max(contexts, default=None)
+        )
+        capabilities = group["capabilities"]
+        assert isinstance(capabilities, frozenset)
+        targets.append(
+            {
+                "id": target_id,
+                "provider_id": provider.id,
+                "protocol": None,
+                "model": model,
+                "credential_id": group["credential_id"],
+                "capabilities": _capability_list(capabilities),
+                "context_window": target_context,
+                "max_output_tokens": None,
+                "reasoning_efforts": sorted(
+                    efforts,
+                    key=lambda item: _REASONING_ORDER[item],
+                ),
+                "trust": "high" if group["high_trust"] else "standard",
+                "host_compatibility": ["codex"],
+                "enabled": True,
+                "metadata": {"migrated_from_schema": 1},
+            }
+        )
+
+    pools: list[dict[str, object]] = []
+    agents: list[dict[str, object]] = []
+    for agent in legacy_agents:
+        target_id = target_by_signature[agent_signatures[agent.name]]
         pool_id = f"{agent.name}-pool"
         pools.append(
             {
