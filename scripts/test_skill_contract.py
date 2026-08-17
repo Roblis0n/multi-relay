@@ -115,6 +115,7 @@ class SkillContractTests(unittest.TestCase):
             for name in (
                 "README.md",
                 "README_EN.md",
+                "RELEASE_NOTES.md",
                 "SKILL.md",
                 "references/catalog.md",
                 "references/rotation.md",
@@ -125,10 +126,13 @@ class SkillContractTests(unittest.TestCase):
         )
         urls = re.findall(r"https?://[^\s`)]+", public)
         self.assertTrue(urls)
+        official_urls = {"https://github.com/Roblis0n/multi-relay"}
         for url in urls:
             with self.subTest(url=url):
                 self.assertTrue(
-                    ".example" in url or url.startswith("http://127.0.0.1:"),
+                    url in official_urls
+                    or ".example" in url
+                    or url.startswith("http://127.0.0.1:"),
                     url,
                 )
         self.assertNotRegex(public, r"\bsk-[A-Za-z0-9_-]{4,}\b")

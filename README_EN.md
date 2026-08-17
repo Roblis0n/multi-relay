@@ -191,4 +191,4 @@ python scripts/check_runtime_contract.py
 python scripts/check_public_contract.py
 ```
 
-Real Codex/Claude Code smoke tests are optional local checks, not part of the offline unit suite. The project uses the [MIT License](./LICENSE) and is an independent community tool with no official affiliation or endorsement from OpenAI, Anthropic, DeepSeek, or any other provider.
+Real Codex/Claude Code smoke tests are optional local checks, not part of the offline unit suite. The project uses the [MIT License](./LICENSE) and is an independent community tool with no official affiliation or endorsement from OpenAI, Anthropic, DeepSeek, or any other provider. Read the [complete release notes](./RELEASE_NOTES.md) or visit the [GitHub repository](https://github.com/Roblis0n/multi-relay).

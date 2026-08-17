@@ -191,4 +191,4 @@ python scripts/check_runtime_contract.py
 python scripts/check_public_contract.py
 ```
 
-真实 Codex/Claude Code smoke test 是可选的本机验证，不属于离线单元测试。项目采用 [MIT License](./LICENSE)，是独立社区工具，与 OpenAI、Anthropic、DeepSeek 或其他 Provider 不存在官方隶属或背书关系。
+真实 Codex/Claude Code smoke test 是可选的本机验证，不属于离线单元测试。项目采用 [MIT License](./LICENSE)，是独立社区工具，与 OpenAI、Anthropic、DeepSeek 或其他 Provider 不存在官方隶属或背书关系。查看 [完整发布说明](./RELEASE_NOTES.md) 或访问 [GitHub 仓库](https://github.com/Roblis0n/multi-relay)。
