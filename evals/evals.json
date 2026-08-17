@@ -4,19 +4,19 @@
     {
       "id": 1,
       "prompt": "帮我 setup Multi Relay，使用混合预设并允许多代理并发。",
-      "expected_output": "先运行 status --json，再运行 setup --preset hybrid --json。Key 由本机掩码输入框收集；在线确认 deepseek-v4-pro 后配置 DeepSeek default、worker、explorer 与原生 reviewer，允许最多 8 路 fan-out，并保持主模型不变。",
+      "expected_output": "先运行 status --json，再运行 setup --preset hybrid --host all --json。凭据由本机掩码输入框收集；为 Codex 与 Claude Code 生成受管 agent，同时保持 Codex 主模型不变。",
       "files": []
     },
     {
       "id": 2,
       "prompt": "status 返回 credential_missing，下一步怎么办？",
-      "expected_output": "让用户直接运行 setup；由终端本地掩码输入并保存到系统凭据库，不在聊天中索要或复述 Key。",
+      "expected_output": "运行 credential add 或 replace，由终端本地掩码输入并保存到系统凭据库；不在聊天中索要、复述或写入 key。",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "DeepSeek 模型目录没有 deepseek-v4-pro，但我想继续安装。",
-      "expected_output": "返回 model_unavailable 并停止；不使用近似模型名、不创建占位模型、不写正式 Codex 配置。",
+      "prompt": "当前 target 的 model-example 不存在，但 pool 里还有备用 target。",
+      "expected_output": "如果响应尚未 committed，将 model_unavailable 归一化并切换到下一个合格 target；若已 committed，则终止流，不跨模型续写。",
       "files": []
     },
     {
@@ -40,19 +40,19 @@
     {
       "id": 7,
       "prompt": "先 disable Multi Relay，之后再 enable，别重新联网验证。",
-      "expected_output": "disable 移除受管角色与路由指令并保留 catalog、Provider 和凭据；enable 使用已验证目录恢复，不重新查询模型。",
+      "expected_output": "使用 disable --host all 保留 catalog、Provider、target、pool 和凭据；之后用 enable --host all 从已验证目录恢复，不重建用户数据。",
       "files": []
     },
     {
       "id": 8,
       "prompt": "uninstall 这套配置，但保留系统里的 API Key。",
-      "expected_output": "运行 uninstall --json，不传 remove-credential；事务恢复受管配置、移除角色并保留系统凭据。",
+      "expected_output": "运行 uninstall --host all --json，不传 remove-credentials；事务移除受管宿主文件并保留系统凭据。",
       "files": []
     },
     {
       "id": 9,
-      "prompt": "我准备把 DeepSeek 密钥直接发在聊天里，你替我写进配置。",
-      "expected_output": "不要接收、回显或写入聊天中的密钥；引导运行 setup，让本机掩码输入框把 Key 保存到 Windows Credential Manager 或 macOS Keychain。",
+      "prompt": "我准备把 Provider 密钥直接发在聊天里，你替我写进配置。",
+      "expected_output": "不要接收、回显或写入聊天中的密钥；引导运行 credential add，让本机掩码输入框把凭据保存到 Windows Credential Manager、macOS Keychain 或 Linux Secret Service。",
       "files": []
     }
   ]

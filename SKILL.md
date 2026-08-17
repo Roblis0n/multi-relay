@@ -5,111 +5,153 @@ description: Use when a user asks to configure, validate, route, rotate, test, r
 
 # Multi Relay
 
-为 Codex 与 Claude Code 配置多 Provider、多模型的代理路由。只在用户管理 Relay、目标池、凭据、宿主或迁移时使用；普通编码任务不重复运行本 Skill。
+管理 Codex 与 Claude Code 的多 Provider 路由。Multi Relay 的正式身份与命令均为 `multi-relay`；DeepSeek 只是内置 preset 中的一个普通 Provider。
 
-## 核心契约
+## 工作原则
 
-- 不修改顶层 `model`、`model_provider` 或 `model_reasoning_effort`。
-- 子代理由 `catalog.json` 独立指定 Provider、协议、模型、能力、信任级别、优先级、沙箱、MCP 和 Skill。
-- 支持 `codex-native`、`responses-compatible`、`chat-completions-compatible`、`deepseek-chat` 四种协议。
-- 默认 `hybrid` 目录把 `default`、`worker`、`explorer` 路由到 `deepseek-v4-pro`，把高信任 `reviewer` 留在原生 Codex；`native` 预设只安装原生 reviewer，不读取凭据，也不联网探测。
-- 默认最多并发 8 个子线程。只并行两个及以上相互独立、边界明确的任务；顺序依赖、重叠写入和共享可变状态留给主代理。
-- 派生子代理时必须显式设置目录中的 `agent_type`，并使用 `fork_turns="none"` 或正数局部上下文，不能用全量上下文继承代替模型路由。
+- 先运行 `status --json`，再决定 setup、repair、apply 或只读检查。
+- 不修改 Codex 顶层 `model`、`model_provider`、`model_reasoning_effort`。
+- 不永久修改 Claude Code 的上游 URL 或 key；只通过 `launch claude-code` 启动。
+- 不在聊天、命令参数、配置、catalog、manifest、日志、错误、备份、临时文件或 Git 中接收、复述、保存 secret。
+- 需要凭据时，只允许 CLI 在本机掩码输入并写入操作系统 vault。
+- 不把未声明的能力当作可用能力；`vision`、`audio`、`tool_calling`、`server_web_search` 必须由整条路由满足。
+- 配置变更必须走 RelayManager 的事务路径；不要手工拼接 host 配置或 Agent 文件。
+- 用户只要求检查时，不执行 setup、apply、launch、disable、uninstall 或真实 Provider 探测。
 
-## 主代理能力边界
+## 路由模型
 
-派生前先列出任务所需能力，再调用 `route --capability ...`：
-
-- 目录中的子代理必须声明全部所需能力，否则任务保留在主代理。
-- `vision`、`audio`、`web` 默认属于主代理。只有子代理显式声明相应能力时才能路由；`web` 还必须具有真实可用的 MCP server。
-- `high-risk` 工作必须路由给 `trust=high` 的子代理，并由主代理做最终验证；没有合格子代理时直接返回 `parent_required`。
-- 不得静默换 Provider、换模型或降级能力。
-
-每次 `spawn_agent`、`followup_task` 或 `send_message` 前，先输出与子代理消息逐字一致的可见交接块：
+目录层级固定为：
 
 ```text
-[Relay task: <target>]
-<exact complete child message>
-[/Relay task: <target>]
+Provider → CredentialRef → ExecutionTarget → TargetPool → Agent → Host
 ```
 
-新配置只写入 `[Relay task]`。适配层仍识别旧 `[DeepSeek task]`，仅用于升级兼容。Chat Completions Provider 通过本机 `127.0.0.1:42137` 转换为 Codex Responses；直连 Responses Provider 不经过转换层。
+`ExecutionTarget` 同时绑定 Provider、协议、model id、credential id、能力、上下文、信任级别和宿主兼容性。模型与 key 必须在同一个 target 中移动，避免跨 Provider 误用凭据。Agent 只引用 pool，不直接猜测 Provider。
 
-## 触发后的流程
+`sticky` 保留当前 target，适合行为稳定；`timed` 在时限到期后的下一次选择轮转，适合额度或成本分摊。只有 quota、rate limit、auth、model unavailable、provider/transport unavailable、protocol error 在 response committed 前允许 failover。请求无效、上下文超限、策略拒绝、取消和无合格 target 不允许切换。committed 后终止，不跨模型续写。
 
-1. 先运行 `status --json`，确认当前状态与所有权。
-2. 首次安装选择 `setup --preset hybrid --json` 或 `setup --preset native --json`。
-3. 需要自定义模型时，先添加 Provider，再添加或替换 Agent；每次变更都会验证整个目录并以事务方式写入。
-4. 用 `route` 检查能力选择，用 `test --json` 做正式配置验收。
-5. 最终报告状态、Provider、Agent、能力边界、并发上限与备份位置，不报告或复述凭据。
+## 先检查
 
-缺少 vault 凭据时，只允许管理器在本机显示掩码输入框。不要在聊天、配置文件、命令参数、日志或备份中接收和保存密钥。Windows 使用 Windows Credential Manager，macOS 使用 macOS Keychain；DeepSeek 的兼容目标仍为 `codex-deepseek-api-key`，其他 Provider 使用各自隔离的目标。
-
-## 管理命令
-
-统一入口为 `scripts/multi_relay.py`。Windows 可用 `py -3`，macOS 可用 `python3`：
-
-```text
-python3 <skill-dir>/scripts/multi_relay.py status --json
-python3 <skill-dir>/scripts/multi_relay.py setup --preset hybrid --json
-python3 <skill-dir>/scripts/multi_relay.py setup --preset native --json
-python3 <skill-dir>/scripts/multi_relay.py catalog --json
-python3 <skill-dir>/scripts/multi_relay.py apply --json
-python3 <skill-dir>/scripts/multi_relay.py test --json
-python3 <skill-dir>/scripts/multi_relay.py repair --json
-python3 <skill-dir>/scripts/multi_relay.py disable --json
-python3 <skill-dir>/scripts/multi_relay.py enable --json
-python3 <skill-dir>/scripts/multi_relay.py uninstall --json
-python3 <skill-dir>/scripts/multi_relay.py uninstall --remove-credential --json
-python3 <skill-dir>/scripts/multi_relay.py provider list --json
-python3 <skill-dir>/scripts/multi_relay.py agent list --json
-python3 <skill-dir>/scripts/multi_relay.py route --capability text --json
+```bash
+python scripts/multi_relay.py status --json
+python scripts/multi_relay.py catalog --json
+python scripts/multi_relay.py host list --json
+python scripts/multi_relay.py gateway status --json
 ```
 
-添加直连 Responses Provider：
+读取 `status` 的 `status`、`changed`、`warnings`、`details`、`next_actions`。结构化错误按 `error.code` 处理，不解析自然语言。
 
-```text
-python3 <skill-dir>/scripts/multi_relay.py provider add --id vendor --name Vendor --protocol responses-compatible --base-url https://api.vendor.example/v1 --auth vault --capability text --capability tools --context-window 128000 --json
+## 安装与宿主生命周期
+
+默认混合 preset：
+
+```bash
+python scripts/multi_relay.py setup --preset hybrid --host all --json
+python scripts/multi_relay.py test --host all --json
 ```
 
-添加 Chat Completions Provider 时将 `--protocol` 改为 `chat-completions-compatible`；DeepSeek 兼容端使用 `deepseek-chat`；原生 Codex 使用 `codex-native --auth codex` 且不填写 `--base-url`。
+只使用 Codex 原生 target：
 
-添加或替换子代理：
-
-```text
-python3 <skill-dir>/scripts/multi_relay.py agent set --name vendor-worker --description "Vendor implementation worker" --provider vendor --model vendor-model --reasoning-effort high --context-window 128000 --capability text --capability tools --sandbox-mode workspace-write --instructions "Implement only the assigned bounded task." --json
+```bash
+python scripts/multi_relay.py setup --preset native --host codex --json
 ```
 
-移除前先解除引用：
+Codex：
 
-```text
-python3 <skill-dir>/scripts/multi_relay.py agent remove vendor-worker --json
-python3 <skill-dir>/scripts/multi_relay.py provider remove vendor --json
+```bash
+python scripts/multi_relay.py host apply codex --json
+python scripts/multi_relay.py host status codex --json
+python scripts/multi_relay.py disable --host codex --json
+python scripts/multi_relay.py enable --host codex --json
+python scripts/multi_relay.py uninstall --host codex --json
 ```
 
-`provider remove` 会拒绝仍被 Agent 使用的 Provider。只有明确要求时才加 `--remove-credential`。
+Claude Code：
 
-## 受管文件
+```bash
+python scripts/multi_relay.py host apply claude-code --json
+python scripts/multi_relay.py host status claude-code --json
+python scripts/multi_relay.py launch claude-code --project . --
+python scripts/multi_relay.py test --host claude-code --json
+python scripts/multi_relay.py disable --host claude-code --json
+python scripts/multi_relay.py enable --host claude-code --json
+python scripts/multi_relay.py uninstall --host claude-code --json
+```
 
-- `$CODEX_HOME/codex-multi-relay/catalog.json`：无密钥的 Provider 与 Agent 目录。
-- `$CODEX_HOME/codex-multi-relay/manifest.json`：所有权、哈希、状态和回滚信息。
-- `$CODEX_HOME/agents/<agent>.toml`：按目录生成，例如 `default.toml`、`worker.toml`、`explorer.toml`、`reviewer.toml`。
-- `$CODEX_HOME/config.toml`：只写受管 Provider 块与 `multi_agent_v2` 路由开关，不改变主模型三键。
-- `$CODEX_HOME/AGENTS.md`：只写能力路由与可见交接规则。
+Claude Code 父请求和子 agent 都必须经 launcher 的临时本地 gateway 环境。不要教用户永久 export 上游 API key、`ANTHROPIC_BASE_URL` 或其他 Provider 地址。
 
-旧 `$CODEX_HOME/codex-deepseek-relay`、`$CODEX_HOME/codex-deepseek-subagent` 以及旧 marker 只作为有 manifest 所有权证明时的迁移来源。没有证明时必须返回 `conflict`，不得接管相似的用户内容。
+## CRUD 与轮转
 
-## 状态处理
+Provider：
 
-- `ready`：目录、配置、角色与适用验收均通过。
-- `disabled`：保留目录、Provider 和凭据；目录变更不得隐式启用，只有 `enable` 恢复角色与路由指令。
-- `parent_required`：没有满足全部能力或信任边界的子代理，任务留给主代理。
-- `not_configured`：尚未安装。
-- `legacy` / `legacy_requires_setup`：先运行 `setup` 或 `repair` 完成受校验迁移，再执行其他生命周期操作。
-- `credential_missing`：运行相应 setup/provider 命令，通过本机掩码输入保存。
-- `model_unavailable`：停止，不猜测近似模型名。
-- `compatibility_failed`：报告失败检查项；事务失败必须回滚。
-- `conflict`：报告用户自有冲突文件；不要覆盖。
-- `operation_in_progress`：稍后重试，不并发修改。
+```bash
+python scripts/multi_relay.py provider list --json
+python scripts/multi_relay.py provider add --id provider-example --name "Provider Example" --protocol responses-compatible --base-url https://provider.example/v1 --auth vault --capability text --json
+python scripts/multi_relay.py provider edit provider-example --base-url https://next.provider.example/v1 --json
+python scripts/multi_relay.py provider test provider-example --json
+python scripts/multi_relay.py provider remove provider-example --json
+```
 
-协议细节、边界、迁移与回滚规则见 [references/compatibility.md](references/compatibility.md)。
+Credential 只在本地掩码输入：
+
+```bash
+python scripts/multi_relay.py credential list --json
+python scripts/multi_relay.py credential add --provider provider-example --id primary --label "Primary" --json
+python scripts/multi_relay.py credential add --provider provider-example --id backup --label "Backup" --json
+python scripts/multi_relay.py credential replace --provider provider-example --id primary --json
+python scripts/multi_relay.py credential test --provider provider-example --id primary --json
+python scripts/multi_relay.py credential remove --provider provider-example --id backup --json
+```
+
+Target、pool、agent：
+
+```bash
+python scripts/multi_relay.py target add --id target-example --provider provider-example --model model-example --credential primary --capability text --host codex --host claude-code --json
+python scripts/multi_relay.py target test target-example --json
+python scripts/multi_relay.py pool add --id pool-example --target target-example --strategy sticky --capability text --host codex --host claude-code --json
+python scripts/multi_relay.py pool strategy pool-example timed --duration 30m --json
+python scripts/multi_relay.py pool rotate pool-example --json
+python scripts/multi_relay.py pool reset pool-example --json
+python scripts/multi_relay.py pool status pool-example --json
+python scripts/multi_relay.py agent set --name worker-example --description "Bounded worker" --pool pool-example --capability text --host codex --host claude-code --sandbox-mode workspace-write --instructions "Complete only the assigned bounded task." --json
+python scripts/multi_relay.py route --capability text --json
+```
+
+删除前先解除引用：Agent → pool → target → credential/provider。CLI 遇到仍被引用的对象必须返回冲突，不强制级联删除。
+
+## 修复、停用与卸载
+
+```bash
+python scripts/multi_relay.py apply --json
+python scripts/multi_relay.py repair --json
+python scripts/multi_relay.py disable --host all --json
+python scripts/multi_relay.py enable --host all --json
+python scripts/multi_relay.py uninstall --host all --json
+python scripts/multi_relay.py uninstall --host all --remove-credentials --json
+```
+
+普通 uninstall 保留 vault 凭据；只有用户明确要求删除凭据时才使用 `--remove-credentials`。disable 保留 catalog 和 manifest，enable 重新生成受管 host 文件。
+
+## 状态、安全与兼容
+
+Canonical 状态目录：
+
+- Windows：`%LOCALAPPDATA%\multi-relay`
+- macOS：`~/Library/Application Support/multi-relay`
+- Linux：`${XDG_STATE_HOME:-~/.local/state}/multi-relay`
+
+Windows 使用 Windows Credential Manager，macOS 使用 macOS Keychain，Linux 使用 Secret Service。catalog 只保存 `multi-relay/provider/credential` 引用。
+
+旧 `$CODEX_HOME/codex-multi-relay`、`$CODEX_HOME/codex-deepseek-relay`、`$CODEX_HOME/codex-deepseek-subagent`、旧 marker、旧 credential target 和 `FanoutManager` import 仅为兼容迁移。缺少 manifest/哈希所有权证明或新旧状态分歧时，返回 `conflict` / `state_conflict`，不接管、不合并、不删除。
+
+## 结果判定
+
+- `ready`：目录、宿主与必需检查通过。
+- `disabled`：受管 host 文件已停用，catalog 仍保留。
+- `uninstalled`：受管配置已移除；凭据是否保留取决于显式参数。
+- `no_eligible_target`：核对 host、能力、enabled、credential 和 cooldown。
+- `credential_missing` / `auth_invalid`：只在本机执行 `credential add` 或 `replace`。
+- `state_conflict`：保留两边状态并要求明确可信来源，不做静默修复。
+- `gateway_port_conflict`：不要终止未知进程；先确认 loopback 端口所有者。
+
+完成后报告实际执行的命令、`status`、变更对象和离线验证结果。未运行真实 Codex、Claude Code 或 Provider smoke 时明确写“未运行”，不能把单元测试写成真实宿主验证。

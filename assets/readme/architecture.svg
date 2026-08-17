@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="780" viewBox="0 0 1600 780" role="img" aria-labelledby="title desc">
-  <title id="title">Codex Multi Relay architecture</title>
-  <desc id="desc">Four stages show the Codex parent, visible handoff, protocol relay, and native or custom model providers returning tool results safely.</desc>
+  <title id="title">Multi Relay architecture</title>
+  <desc id="desc">Codex and Claude Code use a loopback gateway, target pools, operating-system vault credentials, and protocol adapters.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#8495ad" stroke-width="1" opacity=".05"/>
@@ -19,34 +19,34 @@
   </defs>
   <rect width="1600" height="780" rx="30" fill="#08111f"/>
 <rect x="0" y="0" width="1600" height="780" rx="30" fill="url(#grid)"/>
-<text x="58" y="68" fill="#edf3fb" font-size="38" font-weight="760" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-0.6">How capability routing works</text>
-<text x="58" y="103" fill="#8495ad" font-size="17" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Exact handoff in. Qualified provider out. Parent boundary retained.</text>
+<text x="58" y="68" fill="#edf3fb" font-size="38" font-weight="760" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-0.6">How pooled routing works</text>
+<text x="58" y="103" fill="#8495ad" font-size="17" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Host request in. Eligible target out. Vault secrets stay local.</text>
 <g transform="translate(1287 48)">
   <rect width="255" height="34" rx="17" fill="#42d392" opacity=".12" stroke="#42d392" stroke-opacity=".45"/>
   <circle cx="18" cy="17" r="4" fill="#42d392"/>
-  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">LOCAL BOUNDARY • FAIL CLOSED</text>
+  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">LOOPBACK • FAIL CLOSED</text>
 </g>
 <rect x="356" y="136" width="770" height="366" rx="28" fill="#0d1a2d" fill-opacity=".42" stroke="#42d392" stroke-opacity=".32" stroke-dasharray="9 10"/>
-<text x="382" y="166" fill="#42d392" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1">LOCAL-ONLY SECURITY BOUNDARY</text>
+<text x="382" y="166" fill="#42d392" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1">LOCAL GATEWAY + OS VAULT BOUNDARY</text>
 <rect x="54" y="186" width="260" height="250" rx="22" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
 <text x="78" y="220" fill="#4d6bfe" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">01</text>
-<text x="78" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">CODEX PARENT</text>
-<text x="78" y="293" fill="#edf3fb" font-size="17" font-weight="620" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start">Main task</text>
-<text x="78" y="322" fill="#8495ad" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Parent model unchanged</text>
+<text x="78" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">CODEX / CLAUDE</text>
+<text x="78" y="293" fill="#edf3fb" font-size="17" font-weight="620" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start">Parent + agents</text>
+<text x="78" y="322" fill="#8495ad" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Host lifecycle owned</text>
 <path d="M78 352H288" stroke="#8495ad" stroke-opacity=".22"/>
-<text x="78" y="384" fill="#4d6bfe" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">spawn_agent</text>
-<text x="78" y="410" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">agent_type is explicit</text>
+<text x="78" y="384" fill="#4d6bfe" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">request / tools</text>
+<text x="78" y="410" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">capabilities explicit</text>
 <rect x="390" y="186" width="286" height="250" rx="22" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
 <text x="414" y="220" fill="#4d6bfe" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">02</text>
-<text x="414" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.2">VISIBLE HANDOFF</text>
+<text x="414" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.2">TARGET POOL</text>
 <rect x="414" y="282" width="238" height="86" rx="12" fill="#08111f" stroke="#4d6bfe" stroke-opacity=".55"/>
-<text x="430" y="308" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">[Relay task: target]</text>
-<text x="430" y="334" fill="#edf3fb" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">exact complete task text</text>
-<text x="430" y="354" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">[/Relay task: target]</text>
-<text x="414" y="402" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Missing or mismatched → reject</text>
+<text x="430" y="308" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">sticky: keep target</text>
+<text x="430" y="334" fill="#edf3fb" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">timed: rotate on clock</text>
+<text x="430" y="354" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">health + capabilities</text>
+<text x="414" y="402" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">No eligible target → reject</text>
 <rect x="724" y="186" width="354" height="250" rx="22" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
 <text x="748" y="220" fill="#4d6bfe" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">03</text>
-<text x="748" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">LOCAL RELAY</text>
+<text x="748" y="258" fill="#edf3fb" font-size="22" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">LOCAL GATEWAY</text>
 <g transform="translate(758 281)" data-component="relay-mark" aria-label="Local relay protocol bridge">
   <rect x="18" y="10" width="86" height="106" rx="18" fill="#08111f" stroke="#4d6bfe" stroke-width="2"/>
   <path d="M0 63H70.76" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>
@@ -70,12 +70,12 @@
   <circle cx="0" cy="63" r="6" fill="#4d6bfe"/>
 </g>
 <text x="906" y="304" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">127.0.0.1:42137</text>
-<text x="906" y="334" fill="#edf3fb" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Responses</text>
-<text x="906" y="356" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">↓ protocol bridge</text>
-<text x="906" y="380" fill="#edf3fb" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Chat Completions</text>
+<text x="906" y="334" fill="#edf3fb" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">protocol adapters</text>
+<text x="906" y="356" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">OS vault lookup</text>
+<text x="906" y="380" fill="#edf3fb" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">commit boundary</text>
 <text x="906" y="410" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">loopback only</text>
 <rect x="1148" y="136" width="410" height="366" rx="22" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
-<text x="1176" y="174" fill="#edf3fb" font-size="19" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">04  MODEL PROVIDERS ×8</text>
+<text x="1176" y="174" fill="#edf3fb" font-size="19" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">04  EXECUTION TARGETS ×8</text>
 <g transform="translate(1190 198)" data-node="child" data-role="default">
   <rect width="174" height="34" rx="17" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <circle cx="18" cy="17" r="5" fill="#42d392"/>
@@ -116,9 +116,9 @@
   <circle cx="18" cy="17" r="5" fill="#42d392"/>
   <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">08  reviewer</text>
 </g>
-<text x="1190" y="430" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">default / worker / explorer / reviewer</text>
-<text x="1190" y="454" fill="#42d392" font-size="11" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">NATIVE CODEX • RESPONSES API</text>
-<text x="1190" y="476" fill="#42d392" font-size="11" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">CHAT COMPLETIONS • deepseek-v4-pro</text>
+<text x="1190" y="430" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">MODEL + CREDENTIAL + CAPABILITIES</text>
+<text x="1190" y="454" fill="#42d392" font-size="11" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">DEEPSEEK • ANTHROPIC MESSAGES</text>
+<text x="1190" y="476" fill="#42d392" font-size="11" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">OPENAI-COMPATIBLE • NATIVE</text>
 <path d="M314 310H374" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
 <path d="M676 310H708" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
 <path d="M1078 310H1132" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
@@ -133,5 +133,5 @@
 <text x="512" y="588" fill="#42d392" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.8">SAFE PROGRESS</text>
 <text x="58" y="686" fill="#8495ad" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1">PRIVATE REASONING</text>
 <text x="58" y="716" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Sealed only for continuation; never shown as a fabricated transcript.</text>
-<text x="1542" y="724" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1.1">codex-multi-relay</text>
+<text x="1542" y="724" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1.1">multi-relay</text>
 </svg>

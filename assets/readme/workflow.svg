@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="460" viewBox="0 0 1600 460" role="img" aria-labelledby="title desc">
-  <title id="title">Relay setup and verification workflow</title>
-  <desc id="desc">Provider-scoped credential storage, model probing, transactional catalog installation, capability routing, verification, and automatic rollback.</desc>
+  <title id="title">Multi Relay commit-aware rotation workflow</title>
+  <desc id="desc">Retryable failures rotate before visible output; failures after the response commits terminate without cross-model continuation.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#8495ad" stroke-width="1" opacity=".05"/>
@@ -21,64 +21,66 @@
   </defs>
   <rect width="1600" height="460" rx="30" fill="#08111f"/>
 <rect width="1600" height="460" rx="30" fill="url(#grid)"/>
-<text x="54" y="62" fill="#edf3fb" font-size="36" font-weight="760" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-0.5">Configure once. Prove every boundary.</text>
-<text x="54" y="98" fill="#8495ad" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">A guarded install path with an automatic way back.</text>
+<text x="54" y="62" fill="#edf3fb" font-size="36" font-weight="760" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-0.5">Rotate before commit. Stop after commit.</text>
+<text x="54" y="98" fill="#8495ad" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Fail over only while the response can still be replaced safely.</text>
 <g transform="translate(1260 48)">
   <rect width="284" height="34" rx="17" fill="#42d392" opacity=".12" stroke="#42d392" stroke-opacity=".45"/>
   <circle cx="18" cy="17" r="4" fill="#42d392"/>
-  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">TRANSACTIONAL • VERIFIED</text>
+  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">COMMIT-AWARE • FAIL CLOSED</text>
 </g>
 <g transform="translate(54 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">01</text>
-  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">CREDENTIAL</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">system credential store</text>
+  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">SELECT POOL</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">sticky or timed</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">PROVIDER SCOPED</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">CAPABILITY FILTER</text>
 </g>
 <g transform="translate(360 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">02</text>
-  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">MODEL PROBE</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">provider catalog</text>
+  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">ATTEMPT TARGET</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">model + credential</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">EXACT MODEL</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">NO OUTPUT YET</text>
 </g>
 <g transform="translate(666 164)">
   <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">03</text>
-  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">TRANSACTION</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">atomic catalog apply</text>
+  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">PRE-COMMIT</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">retryable failure</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">BACKUP FIRST</text>
+  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">ROTATE TARGET</text>
 </g>
 <g transform="translate(972 164)">
-  <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".28"/>
+  <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#42d392" stroke-opacity=".72"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">04</text>
-  <text x="22" y="72" fill="#edf3fb" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">CAPABILITY ROUTE</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">VISION • AUDIO • WEB</text>
+  <text x="22" y="72" fill="#42d392" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">COMMITTED</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">first visible output</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#4d6bfe" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">HIGH-RISK → TRUST</text>
+  <text x="22" y="148" fill="#42d392" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">BOUNDARY CROSSED</text>
 </g>
 <g transform="translate(1278 164)">
-  <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#42d392" stroke-opacity=".72"/>
+  <rect width="260" height="164" rx="20" fill="#0d1a2d" stroke="#ef6a72" stroke-opacity=".28"/>
   <text x="22" y="34" fill="#4d6bfe" font-size="14" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">05</text>
-  <text x="22" y="72" fill="#42d392" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">VERIFY</text>
-  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">parent owns final check</text>
+  <text x="22" y="72" fill="#ef6a72" font-size="20" font-weight="740" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.3">POST-COMMIT</text>
+  <text x="22" y="104" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">stream failure</text>
   <path d="M22 122H238" stroke="#8495ad" stroke-opacity=".20"/>
-  <text x="22" y="148" fill="#42d392" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">READY</text>
+  <text x="22" y="148" fill="#ef6a72" font-size="11" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">TERMINATE</text>
 </g>
 <path d="M314 246H346" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
 <path d="M620 246H652" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
 <path d="M926 246H958" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
 <path d="M1232 246H1264" fill="none" stroke="#4d6bfe" stroke-width="3" marker-end="url(#arrowRoute)"/>
-<path data-route="rollback" d="M1408 328V348" fill="none" stroke="#f2b84b" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrowWarning)"/>
-<g transform="translate(1278 354)" data-component="rollback-card">
+<path data-route="precommit-rotate" d="M796 328V348" fill="none" stroke="#f2b84b" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrowWarning)"/>
+<g transform="translate(666 354)" data-component="rotation-card">
   <rect width="260" height="58" rx="16" fill="#f2b84b" fill-opacity=".08" stroke="#f2b84b" stroke-opacity=".50"/>
-  <text x="20" y="23" fill="#f2b84b" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">ANY FAILURE</text>
-  <text x="20" y="46" fill="#f2b84b" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1">ROLLBACK</text>
-  <text x="238" y="37" fill="#8495ad" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="0.6">AUTO RESTORE</text>
+  <text x="20" y="23" fill="#f2b84b" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">BEFORE COMMIT</text>
+  <text x="20" y="46" fill="#f2b84b" font-size="15" font-weight="760" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.6">TRY NEXT TARGET</text>
+  <text x="238" y="37" fill="#8495ad" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="0.6">SAFE REPLACE</text>
 </g>
-<text x="54" y="404" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.5">CREDENTIAL → MODEL PROBE → TRANSACTION → CAPABILITY ROUTING → VERIFY</text>
-<text x="1546" y="438" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1">codex-multi-relay</text>
+<path data-component="commit-barrier" d="M1258 144V334" stroke="#42d392" stroke-width="2" stroke-dasharray="5 7" opacity=".72"/>
+<text x="1250" y="130" fill="#42d392" font-size="10" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="0.7">COMMIT BARRIER</text>
+<text x="54" y="404" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.5">POOL → TARGET → PRE-COMMIT ROTATION → COMMIT → TERMINATE ON STREAM FAILURE</text>
+<text x="1546" y="438" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1">multi-relay</text>
 </svg>

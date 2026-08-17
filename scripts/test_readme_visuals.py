@@ -119,9 +119,10 @@ class ReadmeVisualTests(unittest.TestCase):
                 svg = path.read_text(encoding="utf-8")
                 if name == "workflow.svg":
                     self.assertIn(PALETTE["warning"], svg)
+                    self.assertIn(PALETTE["failure"], svg)
                 else:
                     self.assertNotIn(PALETTE["warning"], svg, name)
-                self.assertNotIn(PALETTE["failure"], svg, name)
+                    self.assertNotIn(PALETTE["failure"], svg, name)
 
     def test_hero_and_architecture_show_exactly_eight_role_slots(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -145,8 +146,8 @@ class ReadmeVisualTests(unittest.TestCase):
             )
 
             for label in (
-                "AUDITED HANDOFF",
-                "CAPABILITY ROUTING",
+                "LOOPBACK ONLY",
+                "TARGET POOL",
                 "UP TO 8 CHILDREN",
                 "default",
                 "worker",
@@ -155,23 +156,27 @@ class ReadmeVisualTests(unittest.TestCase):
             ):
                 self.assertIn(label, hero_text)
             for label in (
-                "CODEX PARENT",
-                "VISIBLE HANDOFF",
-                "LOCAL RELAY",
-                "MODEL PROVIDERS",
-                "NATIVE CODEX",
-                "RESPONSES API",
-                "CHAT COMPLETIONS",
+                "CODEX / CLAUDE",
+                "TARGET POOL",
+                "LOCAL GATEWAY",
+                "EXECUTION TARGETS",
+                "OS VAULT",
+                "ANTHROPIC MESSAGES",
+                "OPENAI-COMPATIBLE",
                 "TOOL CALLS",
                 "SAFE PROGRESS",
             ):
                 self.assertIn(label, architecture_text)
-            for label in ("VERIFY", "ROLLBACK", "MODEL PROBE", "TRANSACTION"):
+            for label in (
+                "SELECT POOL",
+                "PRE-COMMIT",
+                "COMMITTED",
+                "POST-COMMIT",
+                "TRY NEXT TARGET",
+                "TERMINATE",
+            ):
                 self.assertIn(label, workflow_text)
-            self.assertIn("system credential store", workflow_text)
-            self.assertNotIn("system keychain", workflow_text)
-            for boundary in ("VISION", "AUDIO", "WEB", "HIGH-RISK"):
-                self.assertIn(boundary, workflow_text)
+            self.assertIn("COMMIT BARRIER", workflow_text)
 
     def test_generated_svgs_never_embed_vendor_images(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -184,12 +189,12 @@ class ReadmeVisualTests(unittest.TestCase):
                 self.assertNotIn("image", local_names, name)
                 self.assertNotIn("data:image", path.read_text(encoding="utf-8"))
 
-    def test_rollback_route_stops_before_the_rollback_card(self) -> None:
+    def test_precommit_route_stops_before_the_rotation_card(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             workflow = write_svg_assets(Path(output_dir))["workflow.svg"]
             root = ET.parse(workflow).getroot()
-            routes = elements_with(root, "data-route", "rollback")
-            cards = elements_with(root, "data-component", "rollback-card")
+            routes = elements_with(root, "data-route", "precommit-rotate")
+            cards = elements_with(root, "data-component", "rotation-card")
             self.assertEqual(len(routes), 1)
             self.assertEqual(len(cards), 1)
 

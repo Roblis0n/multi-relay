@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Codex Multi Relay mark</title>
+  <title id="title">Multi Relay mark</title>
   <desc id="desc">A project-owned relay gate with one incoming route and eight verified outputs.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
@@ -20,7 +20,7 @@
   <rect width="512" height="512" rx="104" fill="#08111f"/>
 <rect x="18" y="18" width="476" height="476" rx="88" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".24"/>
 <circle cx="264" cy="256" r="212" fill="url(#relayGlow)"/>
-<g transform="translate(76 92)" data-component="relay-mark" aria-label="Codex Multi Relay project mark">
+<g transform="translate(76 92)" data-component="relay-mark" aria-label="Multi Relay project mark">
   <rect x="18" y="10" width="320" height="308" rx="18" fill="#08111f" stroke="#4d6bfe" stroke-width="2"/>
   <path d="M0 164H206.48" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>
   <path d="M206.48 24V304" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>

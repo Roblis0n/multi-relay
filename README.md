@@ -1,169 +1,194 @@
 **简体中文** | [English](./README_EN.md)
 
 <p align="center">
-  <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务按能力路由到多模型子代理，联网、视觉、音频和高风险任务保留在主代理">
+  <img src="./assets/readme/hero.png" width="100%" alt="Multi Relay 在 Codex 与 Claude Code、target pool、本地网关和多 Provider 之间进行路由">
 </p>
 
 <h1 align="center">Multi Relay</h1>
 
-<p align="center">为每个 Codex 子代理选择合适的 Provider 与模型，同时给主代理保留明确的能力边界。</p>
+<p align="center">让 Codex 与 Claude Code 通过一个本地网关，按能力在多模型、多 Provider、多凭据 target pool 中安全轮转。</p>
 
-项目现在以无密钥的 `catalog.json` 管理 Provider 和 Agent。每个子代理可以独立设置协议、模型、能力、优先级、信任级别、沙箱、MCP 和 Skill。默认混合目录让 `default`、`worker`、`explorer` 使用经验证的 `deepseek-v4-pro`，让高信任 `reviewer` 使用原生 Codex；主任务继续使用用户原来的模型。
+Multi Relay 把一次执行的四个关键事实放进 `ExecutionTarget`：Provider、协议、模型和凭据引用。Agent 只选择 pool；pool 再选择 target。这样切换模型时一定同步切换对应 key，不会把 A Provider 的凭据误发给 B Provider，也不会让一个模糊的“模型名”暗中改变认证边界。
 
-## 能得到什么
+## 支持矩阵
 
-- 支持 `codex-native`、`responses-compatible`、`chat-completions-compatible`、`deepseek-chat`；
-- 可用 CLI 添加或删除 Provider、创建任意命名的 Agent、替换模型并查询最终路由；
-- 根据 `text`、`tools`、`vision`、`audio`、`web` 与 `high-risk` 边界选择子代理；没有完整能力匹配时返回 `parent_required`；
-- 默认最多 8 路并发，只 fan-out 相互独立的工作项；
-- 保持 `multi_agent_v2`，通过显式 `agent_type` 和 `fork_turns="none"` 固定实际子代理；
-- Chat Completions 协议通过仅监听 `127.0.0.1:42137` 的本机 Relay 转换为 Responses；Responses 兼容端直接连接；
-- 每次派生前显示完整的 `[Relay task: <target>]` 交接，适配层按目标精确匹配，宿主密文不会被误发给外部 Provider；
-- vault 凭据只保存在 Windows Credential Manager 或 macOS Keychain，且按 Provider 隔离；
-- 所有目录和配置变更都解析、校验并事务写入，失败自动回滚；
-- disable 后仍可编辑目录，但不会隐式重新启用；只有 enable 恢复角色和路由规则。
+| 能力 | Codex | Claude Code |
+| --- | --- | --- |
+| 安装受管 agent | 用户级 `config.toml`、`AGENTS.md`、Agent TOML | 用户级或项目级 `.claude/agents/*.md` |
+| 父请求 | 保持原 Codex 主模型；受管 HTTP target 走网关 | 必须由 launcher 启动，父请求与子 agent 都走网关 |
+| 子 agent | 原生 Codex target 或网关 pool | 网关 pool |
+| 协议 | Responses、Chat Completions、DeepSeek Chat、原生 Codex | Anthropic Messages，经网关适配其他协议 |
+| 平台 | Windows、macOS、Linux | Windows、macOS、Linux；需已有 Claude Code |
+| 安全停用/卸载 | 支持 | 支持 |
 
-<p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%" alt="架构图：Codex 父任务经能力路由选择原生 Codex、Responses 或 Chat Completions 子代理">
-</p>
+Claude Code 必须经 launcher 启动。launcher 只为该进程注入本地 loopback 地址和短期网关 token，因此 Claude Code 的父请求也能获得同一套轮转、冷却、凭据隔离和 committed 边界；它不会永久导出任何上游 API key。
 
-<p align="center">
-  <img src="./assets/readme/workflow.svg" width="100%" alt="多模型目录的验证与回滚流程，以及视觉、音频、联网和高风险任务的主代理边界">
-</p>
+## 5 分钟开始
 
-## 快速开始
-
-要求：Windows 或 macOS、Python 3.11+、Codex 桌面运行时。只有使用 vault Provider 的目录才需要对应 API Key；纯原生目录不需要额外凭据。
-
-如果作为 Skill 安装：
+要求：Python 3.11+；使用 Codex 时需 Codex，使用 Claude Code 时需 Claude Code。先安装 Skill：
 
 ```bash
 npx skills add Roblis0n/multi-relay -g -y
 ```
 
-也可以在项目目录双击 `configure-multi-relay.cmd`，安装默认混合目录。
-
-Windows 终端方式：
-
-```powershell
-python scripts\multi_relay.py setup --preset hybrid
-```
-
-macOS：
+在仓库目录检查状态并安装默认混合目录：
 
 ```bash
-python3 scripts/multi_relay.py setup --preset hybrid
+python scripts/multi_relay.py status --json
+python scripts/multi_relay.py setup --preset hybrid --host all --json
+python scripts/multi_relay.py test --host all --json
 ```
 
-只想使用 Codex 原生子代理时运行：
+需要凭据时，CLI 会在本机显示掩码输入；不要把 key 写进聊天或命令。只使用原生 Codex target 时：
 
 ```bash
-python3 scripts/multi_relay.py setup --preset native
+python scripts/multi_relay.py setup --preset native --host codex --json
 ```
 
-`native` 不读取凭据，也不联网。`hybrid` 会在当前终端显示本地掩码输入框；Key 不要发到聊天窗口。只有模型、兼容性和正式验收全部通过才返回 `ready`，否则事务恢复原配置。
+启动 Claude Code：
 
-## 安装结果
+```bash
+python scripts/multi_relay.py host apply claude-code --json
+python scripts/multi_relay.py launch claude-code --project . -- --help
+```
 
-管理器写入 `$CODEX_HOME/codex-multi-relay/catalog.json`，再按目录生成 Agent TOML。默认 `hybrid` 会创建：
+`--` 后的参数原样交给 Claude Code。日常启动也必须使用 `multi-relay launch claude-code`，不要永久设置上游 key 或 Provider base URL。
+
+## 一个跨 Provider target pool
+
+以下示例 URL 与 model id 全是假值。三个 target 故意声明不同能力：DeepSeek target 支持文本与工具，Anthropic Messages target 只支持文本，OpenAI-compatible target 支持文本、工具与视觉。
+
+```bash
+python scripts/multi_relay.py provider add --id deepseek-example --name "DeepSeek Example" --protocol deepseek-chat --base-url https://deepseek.example/v1 --auth vault --capability text --capability tool_calling --json
+python scripts/multi_relay.py provider add --id anthropic-example --name "Anthropic Example" --protocol anthropic-messages --base-url https://anthropic.example/v1 --auth vault --capability text --json
+python scripts/multi_relay.py provider add --id openai-example --name "OpenAI-compatible Example" --protocol responses-compatible --base-url https://responses.example/v1 --auth vault --capability text --capability tool_calling --capability vision --json
+
+python scripts/multi_relay.py credential add --provider deepseek-example --id primary --label "DeepSeek primary" --json
+python scripts/multi_relay.py credential add --provider anthropic-example --id primary --label "Anthropic primary" --json
+python scripts/multi_relay.py credential add --provider openai-example --id primary --label "Responses primary" --json
+
+python scripts/multi_relay.py target add --id deepseek-text-tools --provider deepseek-example --model reasoner-example --credential primary --capability text --capability tool_calling --host codex --host claude-code --json
+python scripts/multi_relay.py target add --id anthropic-text --provider anthropic-example --model messages-example --credential primary --capability text --host codex --host claude-code --json
+python scripts/multi_relay.py target add --id openai-vision-tools --provider openai-example --model responses-example --credential primary --capability text --capability tool_calling --capability vision --host codex --host claude-code --json
+
+python scripts/multi_relay.py pool add --id cross-provider --target deepseek-text-tools --target anthropic-text --target openai-vision-tools --strategy sticky --capability text --host codex --host claude-code --json
+python scripts/multi_relay.py agent set --name pooled-worker --description "Cross-provider worker" --pool cross-provider --capability text --host codex --host claude-code --sandbox-mode workspace-write --instructions "Complete only the assigned bounded task." --json
+```
+
+一个 Provider 可以有多个凭据。再添加 `backup` credential 并创建第二个 target，就能让同一模型的两个 key 独立计数、冷却与禁用。
+
+## sticky、timed 与错误切换
+
+`sticky` 适合希望尽量保持模型行为一致的工作：当前 target 一直保留，直到手动轮转、被禁用，或在响应尚未 committed 时发生可切换错误。
+
+```bash
+python scripts/multi_relay.py pool strategy cross-provider sticky --json
+python scripts/multi_relay.py pool rotate cross-provider --json
+```
+
+`timed` 适合定时分摊额度或成本：到期后，下一次选择会转到下一个合格 target。
+
+```bash
+python scripts/multi_relay.py pool strategy cross-provider timed --duration 30m --json
+python scripts/multi_relay.py pool status cross-provider --json
+```
+
+只在开始可见输出前，以下错误允许切换：额度耗尽、限流、认证失败、模型不可用、Provider/传输不可用、协议响应错误。认证失败还会禁用对应 credential。请求无效、上下文超限、策略拒绝、用户取消和没有合格 target 不会换模型，因为重复同一请求不能安全解决它们。
+
+一旦收到首个文本 delta、工具调用开始或其他可见内容，响应即 committed。之后若流中断，网关会终止并返回结构化错误，不会让另一个模型续写：另一个模型没有完全相同的隐藏状态、采样轨迹和工具上下文，拼接会制造一段无法证明来源的一致性假象。
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="Multi Relay 在响应 committed 前允许轮转，committed 后遇到错误则终止">
+</p>
+
+## 架构
+
+<p align="center">
+  <img src="./assets/readme/architecture.svg" width="100%" alt="Codex 与 Claude Code 通过本地 Multi Relay gateway、target pool 和系统 vault 连接多个 Provider">
+</p>
+
+- `catalog.json` 无 secret，定义 Provider、credential 引用、target、pool、agent 与 host。
+- loopback gateway 只监听 `127.0.0.1`，统一 Responses 与 Anthropic Messages 宿主入口。
+- 协议 adapter 在 canonical request/event 层转换，不读取环境中的上游 secret。
+- vault 在真正发起 upstream 请求前，按 target 的 credential 引用读取一次凭据。
+- `vision`、`audio`、`tool_calling`、`server_web_search` 等能力必须由 Provider、target、pool 与 agent 同时满足；联网 agent 还要配置实际 MCP/tool。
+
+详见 [目录模型](references/catalog.md)、[轮转与 committed 边界](references/rotation.md)、[Codex](references/codex.md) 和 [Claude Code](references/claude-code.md)。
+
+## CLI 索引
 
 ```text
-$CODEX_HOME/agents/default.toml
-$CODEX_HOME/agents/worker.toml
-$CODEX_HOME/agents/explorer.toml
-$CODEX_HOME/agents/reviewer.toml
+status | catalog | setup | apply | repair | test
+provider list|add|edit|discover-models|test|enable|disable|remove
+credential list|add|replace|test|enable|disable|remove
+target list|add|edit|test|enable|disable|remove
+pool list|add|edit|order|strategy|rotate|reset|status|remove
+agent list|set|remove
+host list|apply|status
+gateway start|status|stop
+route | launch claude-code | disable | enable | uninstall
 ```
 
-协议映射如下：
+所有命令支持稳定的 `--json` 结果信封。查看某个动作的精确参数：
 
-| 协议 | 路径 | 认证 |
-| --- | --- | --- |
-| `codex-native` | Codex 原生 Provider | Codex 登录态 |
-| `responses-compatible` | 直连 Provider Responses API | vault 或无认证 |
-| `chat-completions-compatible` | 本机 Relay 转换 Chat Completions | vault 或无认证 |
-| `deepseek-chat` | 本机 Relay 的 DeepSeek 适配与思考续接 | vault |
-
-同时在 `$CODEX_HOME/AGENTS.md` 写入可移除的能力路由规则，并保证：
-
-- 顶层主模型、主 Provider、主思考强度不变；
-- 并发下限为 8，用户已有更高值时保留；
-- 每个子代理显式使用 `agent_type` 与 `fork_turns="none"`（或正数局部上下文）；
-- 每次 spawn、follow-up 或 send 前先输出与目标一一对应的 `[Relay task: <target>]` 交接块；缺少交接时适配层严格拒绝；
-- 不替换正式模型目录；
-- 不关闭新版多代理；
-- 不满足能力或信任边界时留在主代理，不静默换 Provider 或模型。
-
-## 日常使用
-
-配置成功后，无需重复运行 setup。直接给 Codex 正常任务即可：
-
-```text
-并行调查这四个互相独立的模块，最后给出综合结论。
+```bash
+python scripts/multi_relay.py --help
+python scripts/multi_relay.py target add --help
+python scripts/multi_relay.py pool add --help
+python scripts/multi_relay.py launch claude-code --help
 ```
 
-受管规则会先检查能力再 fan-out；共享状态、同一文件写入和顺序依赖任务仍由主代理串行处理。
+生命周期示例：
 
-Codex 会在本机工具层之前保护原生子代理消息，自定义 Provider 无法解开宿主密文。受管规则因此先把同一份完整任务以 `[Relay task]` 可见交接块写到父任务评论区，再调用原生子代理工具。适配层只接受目标和顺序均精确匹配的交接；找不到时返回错误，不让外部 Provider 根据密文猜任务。
-
-`vision`、`audio` 和 `web` 默认留给主代理。子代理只有显式声明全部能力才有资格；web 代理还必须带真实 MCP server。`high-risk` 请求需要 `trust=high`，并始终由主代理最终验证。
-
-## 管理命令
-
-以下以 Windows 为例；macOS 把 `python` 换成 `python3`，路径分隔符换成 `/`：
-
-```powershell
-python scripts\multi_relay.py status --json
-python scripts\multi_relay.py setup --preset hybrid --json
-python scripts\multi_relay.py setup --preset native --json
-python scripts\multi_relay.py catalog --json
-python scripts\multi_relay.py apply --json
-python scripts\multi_relay.py provider list --json
-python scripts\multi_relay.py provider add --id vendor --name Vendor --protocol responses-compatible --base-url https://api.vendor.example/v1 --auth vault --capability text --capability tools --context-window 128000 --json
-python scripts\multi_relay.py provider remove vendor --json
-python scripts\multi_relay.py agent list --json
-python scripts\multi_relay.py agent set --name vendor-worker --description "Vendor worker" --provider vendor --model vendor-model --capability text --capability tools --instructions "Implement the assigned bounded task." --json
-python scripts\multi_relay.py agent remove vendor-worker --json
-python scripts\multi_relay.py route --capability text --capability tools --json
-python scripts\multi_relay.py test --json
-python scripts\multi_relay.py repair --json
-python scripts\multi_relay.py disable --json
-python scripts\multi_relay.py enable --json
-python scripts\multi_relay.py uninstall --json
-python scripts\multi_relay.py uninstall --remove-credential --json
+```bash
+python scripts/multi_relay.py disable --host all --json
+python scripts/multi_relay.py enable --host all --json
+python scripts/multi_relay.py uninstall --host all --json
+python scripts/multi_relay.py uninstall --host all --remove-credentials --json
 ```
 
-- 普通 uninstall 保留 Key。
-- 只有带 `--remove-credential` 的 uninstall 才删除系统凭据。
-- `provider remove` 会拒绝删除仍被 Agent 引用的 Provider。
-- `repair` 保留当前目录；重复 setup 也不会把自定义目录重置为默认值。
-- disabled 状态下可以更新目录，但只有 `enable` 会重新生成角色和路由指令。
-- 自动发现 Codex 失败时，用 `CODEX_DESKTOP_BIN` 指定桌面运行时。
+普通卸载保留 vault 凭据；只有显式 `--remove-credentials` 才删除受管 credential。
 
-## 安全与回滚
+## 安全模型与状态位置
 
-管理器使用进程锁、解析后写入、同目录原子替换和逐文件校验和。备份位于：
+上游凭据只保存在 Windows Credential Manager、macOS Keychain 或 Linux Secret Service。它们绝不会写入 catalog、manifest、host 配置、Agent 文件、命令参数、日志、错误、备份、临时文件或 Git。catalog 中只有形如 `multi-relay/provider-id/credential-id` 的非 secret 引用。
 
-```text
-$CODEX_HOME/codex-multi-relay/backups/
-```
+产品状态不再以 Codex Home 作为根目录：
 
-Key 不进入配置、命令参数、临时文件、备份、日志、异常或 Git。旧 `$CODEX_HOME/codex-deepseek-relay` 和 `$CODEX_HOME/codex-deepseek-subagent` 状态只作为迁移来源；旧 manifest、受管 marker 与校验和无法证明所有权时返回 `conflict`，不会接管用户内容。
+| 平台 | 默认状态目录 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\multi-relay` |
+| macOS | `~/Library/Application Support/multi-relay` |
+| Linux | `${XDG_STATE_HOME:-~/.local/state}/multi-relay` |
 
-更多细节见 [兼容性与安全边界](references/compatibility.md) 和 [Skill 执行规则](SKILL.md)。
+写入采用锁、预校验、同目录原子替换、文件哈希与可回滚备份。更多内容见 [安全模型](references/security.md)。
+
+## 兼容迁移
+
+新状态优先；旧 `$CODEX_HOME/codex-multi-relay`、`$CODEX_HOME/codex-deepseek-relay`、`$CODEX_HOME/codex-deepseek-subagent`，旧 marker 和旧 credential target 仅作为迁移输入。只有 manifest、受管 marker 与哈希能证明所有权时才会复制、验证、切换并清理；新旧状态不一致时返回 `state_conflict`，绝不静默合并。迁移和修复可重复运行。
+
+详见 [兼容与迁移](references/compatibility.md)。
+
+## 限制与排障
+
+- Multi Relay 不会让模型获得它没有声明或没有实际工具支持的能力。
+- committed 后不跨模型续写；应用应重试整个请求或让用户决定下一步。
+- Claude Code 不经 launcher 时不受 Multi Relay 管理。
+- native Codex target 只兼容 Codex；Claude Code pool 必须包含 HTTP target。
+- `no_eligible_target`：检查 host、能力、target/credential enabled 状态和冷却时间。
+- `state_conflict`：保留两边文件，比较 manifest/catalog，确认来源后再迁移。
+- `gateway_port_conflict`：确认 `127.0.0.1:42137` 没有外部或过期进程。
+- `credential_missing` / `auth_invalid`：用 `credential replace` 在本机重新录入，不要在聊天中发送凭据。
 
 ## 开发验证
 
+测试全部使用 fake upstream，不需要真实 Provider 凭据：
+
 ```bash
-python -m unittest discover -s scripts -p "test_*.py" -v
+python -m unittest discover -s scripts -p "test_*.py"
 python -m compileall -q scripts
 python scripts/check_runtime_contract.py
-python scripts/check_codex_bridge_runtime.py --codex-bin <path-to-codex>
+python scripts/check_public_contract.py
 ```
 
-## 品牌说明
-
-本项目是独立社区工具，与 OpenAI、DeepSeek 或其他 Provider 不存在隶属、合作或官方背书关系。相关名称与标志归各自权利人所有。
-
-## License
-
-[MIT](./LICENSE)
+真实 Codex/Claude Code smoke test 是可选的本机验证，不属于离线单元测试。项目采用 [MIT License](./LICENSE)，是独立社区工具，与 OpenAI、Anthropic、DeepSeek 或其他 Provider 不存在官方隶属或背书关系。

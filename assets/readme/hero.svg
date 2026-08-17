@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="620" viewBox="0 0 1800 620" role="img" aria-labelledby="title desc">
-  <title id="title">Codex Multi Relay</title>
-  <desc id="desc">A Codex parent routes audited tasks across native and custom model providers with eight bounded child slots.</desc>
+  <title id="title">Multi Relay</title>
+  <desc id="desc">Codex and Claude Code route through one local gateway to pooled model and credential targets.</desc>
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#8495ad" stroke-width="1" opacity=".05"/>
@@ -22,20 +22,20 @@
 <g transform="translate(72 58)">
   <rect width="252" height="34" rx="17" fill="#42d392" opacity=".12" stroke="#42d392" stroke-opacity=".45"/>
   <circle cx="18" cy="17" r="4" fill="#42d392"/>
-  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">CATALOG • AUDITED • ROUTED</text>
+  <text x="31" y="22" fill="#42d392" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.1">POOLED • PRIVATE • ROUTED</text>
 </g>
-<text x="72" y="158" fill="#edf3fb" font-size="56" font-weight="740" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-1.2">Codex Multi</text>
+<text x="72" y="158" fill="#edf3fb" font-size="56" font-weight="740" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-1.2">Multi</text>
 <text x="72" y="222" fill="#4d6bfe" font-size="72" font-weight="780" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start" letter-spacing="-1.5">Relay</text>
-<text x="74" y="275" fill="#edf3fb" font-size="23" font-weight="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start">Capability routing for Codex child agents.</text>
-<text x="74" y="309" fill="#8495ad" font-size="19" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">One catalog. Multiple models. Eight child slots.</text>
+<text x="74" y="275" fill="#edf3fb" font-size="23" font-weight="580" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" text-anchor="start">Model and credential rotation for coding agents.</text>
+<text x="74" y="309" fill="#8495ad" font-size="19" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">One gateway. Multiple providers. Two hosts.</text>
 <path d="M74 360H674" stroke="#8495ad" stroke-opacity=".22"/>
 <circle cx="82" cy="400" r="5" fill="#4d6bfe"/>
-<text x="104" y="407" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Parent model stays unchanged</text>
+<text x="104" y="407" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Codex + Claude Code</text>
 <circle cx="82" cy="444" r="5" fill="#4d6bfe"/>
-<text x="104" y="451" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Parent-only capabilities stay bounded</text>
+<text x="104" y="451" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Sticky or timed target pools</text>
 <circle cx="82" cy="488" r="5" fill="#42d392"/>
-<text x="104" y="495" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Any failed gate rolls back cleanly</text>
-<text x="74" y="558" fill="#8495ad" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.4">codex-multi-relay</text>
+<text x="104" y="495" fill="#edf3fb" font-size="16" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start">Secrets stay in the OS vault</text>
+<text x="74" y="558" fill="#8495ad" font-size="14" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.4">multi-relay</text>
 <rect x="900" y="44" width="828" height="532" rx="26" fill="#0d1a2d" stroke="#8495ad" stroke-opacity=".26"/>
 <rect x="900" y="44" width="828" height="532" rx="26" fill="url(#grid)"/>
 <text x="940" y="82" fill="#42d392" font-size="14" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="1.3">SIGNAL MAP // READY</text>
@@ -43,13 +43,13 @@
 <circle cx="1306" cy="309" r="158" fill="url(#relayGlow)"/>
 <g transform="translate(944 257)">
   <rect width="178" height="104" rx="18" fill="#08111f" stroke="#8495ad" stroke-opacity=".35"/>
-  <text x="22" y="36" fill="#edf3fb" font-size="17" font-weight="720" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">CODEX HOST</text>
-  <text x="22" y="65" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">PARENT MODEL</text>
+  <text x="22" y="36" fill="#edf3fb" font-size="17" font-weight="720" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">TWO HOSTS</text>
+  <text x="22" y="65" fill="#8495ad" font-size="13" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.8">CODEX + CLAUDE</text>
   <circle cx="150" cy="52" r="10" fill="#4d6bfe" opacity=".18"/>
   <circle cx="150" cy="52" r="4" fill="#4d6bfe"/>
 </g>
 <path d="M1122 309H1213" fill="none" stroke="#4d6bfe" stroke-width="4" marker-end="url(#arrowRoute)"/>
-<text x="1168" y="286" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.8">AUDITED HANDOFF</text>
+<text x="1168" y="286" fill="#4d6bfe" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.8">LOOPBACK ONLY</text>
 <g transform="translate(1230 220)" data-component="relay-mark" aria-label="Relay core with one input and eight outputs">
   <rect x="18" y="10" width="114" height="158" rx="18" fill="#08111f" stroke="#4d6bfe" stroke-width="2"/>
   <path d="M0 89H87" fill="none" stroke="#4d6bfe" stroke-width="6" stroke-linecap="round"/>
@@ -72,8 +72,8 @@
   <circle cx="140" cy="154" r="5" fill="#42d392"/>
   <circle cx="0" cy="89" r="6" fill="#4d6bfe"/>
 </g>
-<text x="1305" y="427" fill="#edf3fb" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.7">CAPABILITY ROUTING</text>
-<text x="1305" y="451" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.4">LOCAL + NATIVE</text>
+<text x="1305" y="427" fill="#edf3fb" font-size="13" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.7">TARGET POOL</text>
+<text x="1305" y="451" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="middle" letter-spacing="0.4">STICKY + TIMED</text>
 <path d="M1380 309H1490M1490 141V491" fill="none" stroke="#4d6bfe" stroke-width="3" stroke-linecap="round"/>
 <path d="M1490 141H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
 <path d="M1490 191H1520" fill="none" stroke="#4d6bfe" stroke-width="2.5" opacity=".72"/>
@@ -123,6 +123,6 @@
   <circle cx="18" cy="17" r="5" fill="#42d392"/>
   <text x="33" y="22" fill="#edf3fb" font-size="13" font-weight="650" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.4">08  reviewer</text>
 </g>
-<text x="940" y="548" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.7">NATIVE • RESPONSES • CHAT COMPLETIONS</text>
+<text x="940" y="548" fill="#8495ad" font-size="12" font-weight="500" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="start" letter-spacing="0.7">RESPONSES • CHAT • ANTHROPIC MESSAGES</text>
 <text x="1688" y="548" fill="#42d392" font-size="12" font-weight="700" font-family="'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace" text-anchor="end" letter-spacing="1.2">VERIFIED</text>
 </svg>

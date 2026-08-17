@@ -213,19 +213,19 @@ def hero_svg() -> str:
         (
             f'<rect width="1800" height="620" rx="30" fill="{PALETTE["ink"]}"/>',
             f'<rect x="1" y="1" width="1798" height="618" rx="29" fill="none" stroke="{PALETTE["muted"]}" stroke-opacity=".22"/>',
-            _chip(72, 58, 252, "CATALOG • AUDITED • ROUTED", color=PALETTE["verified"]),
-            _text(72, 158, "Codex Multi", size=56, weight=740, spacing=-1.2),
+            _chip(72, 58, 252, "POOLED • PRIVATE • ROUTED", color=PALETTE["verified"]),
+            _text(72, 158, "Multi", size=56, weight=740, spacing=-1.2),
             _text(72, 222, "Relay", size=72, color=PALETTE["route"], weight=780, spacing=-1.5),
-            _text(74, 275, "Capability routing for Codex child agents.", size=23, color=PALETTE["text"], weight=580),
-            _text(74, 309, "One catalog. Multiple models. Eight child slots.", size=19, color=PALETTE["muted"], family=MONO),
+            _text(74, 275, "Model and credential rotation for coding agents.", size=23, color=PALETTE["text"], weight=580),
+            _text(74, 309, "One gateway. Multiple providers. Two hosts.", size=19, color=PALETTE["muted"], family=MONO),
             f'<path d="M74 360H674" stroke="{PALETTE["muted"]}" stroke-opacity=".22"/>',
             f'<circle cx="82" cy="400" r="5" fill="{PALETTE["route"]}"/>',
-            _text(104, 407, "Parent model stays unchanged", size=16, color=PALETTE["text"], family=MONO),
+            _text(104, 407, "Codex + Claude Code", size=16, color=PALETTE["text"], family=MONO),
             f'<circle cx="82" cy="444" r="5" fill="{PALETTE["route"]}"/>',
-            _text(104, 451, "Parent-only capabilities stay bounded", size=16, color=PALETTE["text"], family=MONO),
+            _text(104, 451, "Sticky or timed target pools", size=16, color=PALETTE["text"], family=MONO),
             f'<circle cx="82" cy="488" r="5" fill="{PALETTE["verified"]}"/>',
-            _text(104, 495, "Any failed gate rolls back cleanly", size=16, color=PALETTE["text"], family=MONO),
-            _text(74, 558, "codex-multi-relay", size=14, color=PALETTE["muted"], family=MONO, spacing=1.4),
+            _text(104, 495, "Secrets stay in the OS vault", size=16, color=PALETTE["text"], family=MONO),
+            _text(74, 558, "multi-relay", size=14, color=PALETTE["muted"], family=MONO, spacing=1.4),
             _panel(900, 44, 828, 532, radius=26),
             '<rect x="900" y="44" width="828" height="532" rx="26" fill="url(#grid)"/>',
             _text(940, 82, "SIGNAL MAP // READY", size=14, color=PALETTE["verified"], weight=700, family=MONO, spacing=1.3),
@@ -233,28 +233,28 @@ def hero_svg() -> str:
             '<circle cx="1306" cy="309" r="158" fill="url(#relayGlow)"/>',
             '<g transform="translate(944 257)">',
             f'  <rect width="178" height="104" rx="18" fill="{PALETTE["ink"]}" stroke="{PALETTE["muted"]}" stroke-opacity=".35"/>',
-            f'  {_text(22, 36, "CODEX HOST", size=17, weight=720, family=MONO, spacing=.8)}',
-            f'  {_text(22, 65, "PARENT MODEL", size=13, color=PALETTE["muted"], family=MONO, spacing=.8)}',
+            f'  {_text(22, 36, "TWO HOSTS", size=17, weight=720, family=MONO, spacing=.8)}',
+            f'  {_text(22, 65, "CODEX + CLAUDE", size=13, color=PALETTE["muted"], family=MONO, spacing=.8)}',
             f'  <circle cx="150" cy="52" r="10" fill="{PALETTE["route"]}" opacity=".18"/>',
             f'  <circle cx="150" cy="52" r="4" fill="{PALETTE["route"]}"/>',
             "</g>",
             f'<path d="M1122 309H1213" fill="none" stroke="{PALETTE["route"]}" stroke-width="4" marker-end="url(#arrowRoute)"/>',
-            _text(1168, 286, "AUDITED HANDOFF", size=12, color=PALETTE["route"], weight=700, family=MONO, anchor="middle", spacing=.8),
+            _text(1168, 286, "LOOPBACK ONLY", size=12, color=PALETTE["route"], weight=700, family=MONO, anchor="middle", spacing=.8),
             _relay_gate(1230, 220, 150, 178, id_label="Relay core with one input and eight outputs"),
-            _text(1305, 427, "CAPABILITY ROUTING", size=13, color=PALETTE["text"], weight=700, family=MONO, anchor="middle", spacing=.7),
-            _text(1305, 451, "LOCAL + NATIVE", size=12, color=PALETTE["muted"], family=MONO, anchor="middle", spacing=.4),
+            _text(1305, 427, "TARGET POOL", size=13, color=PALETTE["text"], weight=700, family=MONO, anchor="middle", spacing=.7),
+            _text(1305, 451, "STICKY + TIMED", size=12, color=PALETTE["muted"], family=MONO, anchor="middle", spacing=.4),
             f'<path d="M1380 309H1490M1490 141V491" fill="none" stroke="{PALETTE["route"]}" stroke-width="3" stroke-linecap="round"/>',
             *branches,
             *children,
-            _text(940, 548, "NATIVE • RESPONSES • CHAT COMPLETIONS", size=12, color=PALETTE["muted"], family=MONO, spacing=.7),
+            _text(940, 548, "RESPONSES • CHAT • ANTHROPIC MESSAGES", size=12, color=PALETTE["muted"], family=MONO, spacing=.7),
             _text(1688, 548, "VERIFIED", size=12, color=PALETTE["verified"], weight=700, family=MONO, anchor="end", spacing=1.2),
         )
     )
     return _document(
         1800,
         620,
-        "Codex Multi Relay",
-        "A Codex parent routes audited tasks across native and custom model providers with eight bounded child slots.",
+        "Multi Relay",
+        "Codex and Claude Code route through one local gateway to pooled model and credential targets.",
         body,
     )
 
@@ -279,42 +279,42 @@ def architecture_svg() -> str:
         (
             f'<rect width="1600" height="780" rx="30" fill="{PALETTE["ink"]}"/>',
             '<rect x="0" y="0" width="1600" height="780" rx="30" fill="url(#grid)"/>',
-            _text(58, 68, "How capability routing works", size=38, weight=760, spacing=-.6),
-            _text(58, 103, "Exact handoff in. Qualified provider out. Parent boundary retained.", size=17, color=PALETTE["muted"], family=MONO),
-            _chip(1287, 48, 255, "LOCAL BOUNDARY • FAIL CLOSED", color=PALETTE["verified"]),
+            _text(58, 68, "How pooled routing works", size=38, weight=760, spacing=-.6),
+            _text(58, 103, "Host request in. Eligible target out. Vault secrets stay local.", size=17, color=PALETTE["muted"], family=MONO),
+            _chip(1287, 48, 255, "LOOPBACK • FAIL CLOSED", color=PALETTE["verified"]),
             f'<rect x="356" y="136" width="770" height="366" rx="28" fill="{PALETTE["panel"]}" fill-opacity=".42" stroke="{PALETTE["verified"]}" stroke-opacity=".32" stroke-dasharray="9 10"/>',
-            _text(382, 166, "LOCAL-ONLY SECURITY BOUNDARY", size=12, color=PALETTE["verified"], weight=700, family=MONO, spacing=1),
+            _text(382, 166, "LOCAL GATEWAY + OS VAULT BOUNDARY", size=12, color=PALETTE["verified"], weight=700, family=MONO, spacing=1),
             _panel(54, 186, 260, 250),
             _text(78, 220, "01", size=15, color=PALETTE["route"], weight=760, family=MONO),
-            _text(78, 258, "CODEX PARENT", size=22, weight=740, family=MONO, spacing=.4),
-            _text(78, 293, "Main task", size=17, color=PALETTE["text"], weight=620),
-            _text(78, 322, "Parent model unchanged", size=14, color=PALETTE["muted"], family=MONO),
+            _text(78, 258, "CODEX / CLAUDE", size=22, weight=740, family=MONO, spacing=.4),
+            _text(78, 293, "Parent + agents", size=17, color=PALETTE["text"], weight=620),
+            _text(78, 322, "Host lifecycle owned", size=14, color=PALETTE["muted"], family=MONO),
             f'<path d="M78 352H288" stroke="{PALETTE["muted"]}" stroke-opacity=".22"/>',
-            _text(78, 384, "spawn_agent", size=14, color=PALETTE["route"], family=MONO),
-            _text(78, 410, "agent_type is explicit", size=13, color=PALETTE["muted"], family=MONO),
+            _text(78, 384, "request / tools", size=14, color=PALETTE["route"], family=MONO),
+            _text(78, 410, "capabilities explicit", size=13, color=PALETTE["muted"], family=MONO),
             _panel(390, 186, 286, 250),
             _text(414, 220, "02", size=15, color=PALETTE["route"], weight=760, family=MONO),
-            _text(414, 258, "VISIBLE HANDOFF", size=22, weight=740, family=MONO, spacing=.2),
+            _text(414, 258, "TARGET POOL", size=22, weight=740, family=MONO, spacing=.2),
             f'<rect x="414" y="282" width="238" height="86" rx="12" fill="{PALETTE["ink"]}" stroke="{PALETTE["route"]}" stroke-opacity=".55"/>',
-            _text(430, 308, "[Relay task: target]", size=12, color=PALETTE["route"], weight=700, family=MONO),
-            _text(430, 334, "exact complete task text", size=12, color=PALETTE["text"], family=MONO),
-            _text(430, 354, "[/Relay task: target]", size=12, color=PALETTE["route"], weight=700, family=MONO),
-            _text(414, 402, "Missing or mismatched → reject", size=13, color=PALETTE["muted"], family=MONO),
+            _text(430, 308, "sticky: keep target", size=12, color=PALETTE["route"], weight=700, family=MONO),
+            _text(430, 334, "timed: rotate on clock", size=12, color=PALETTE["text"], family=MONO),
+            _text(430, 354, "health + capabilities", size=12, color=PALETTE["route"], weight=700, family=MONO),
+            _text(414, 402, "No eligible target → reject", size=13, color=PALETTE["muted"], family=MONO),
             _panel(724, 186, 354, 250),
             _text(748, 220, "03", size=15, color=PALETTE["route"], weight=760, family=MONO),
-            _text(748, 258, "LOCAL RELAY", size=22, weight=740, family=MONO, spacing=.4),
+            _text(748, 258, "LOCAL GATEWAY", size=22, weight=740, family=MONO, spacing=.4),
             _relay_gate(758, 281, 122, 126, id_label="Local relay protocol bridge"),
             _text(906, 304, "127.0.0.1:42137", size=13, color=PALETTE["verified"], weight=700, family=MONO),
-            _text(906, 334, "Responses", size=13, color=PALETTE["text"], family=MONO),
-            _text(906, 356, "↓ protocol bridge", size=12, color=PALETTE["muted"], family=MONO),
-            _text(906, 380, "Chat Completions", size=13, color=PALETTE["text"], family=MONO),
+            _text(906, 334, "protocol adapters", size=13, color=PALETTE["text"], family=MONO),
+            _text(906, 356, "OS vault lookup", size=12, color=PALETTE["muted"], family=MONO),
+            _text(906, 380, "commit boundary", size=13, color=PALETTE["text"], family=MONO),
             _text(906, 410, "loopback only", size=12, color=PALETTE["muted"], family=MONO),
             _panel(1148, 136, 410, 366),
-            _text(1176, 174, "04  MODEL PROVIDERS ×8", size=19, weight=740, family=MONO, spacing=.3),
+            _text(1176, 174, "04  EXECUTION TARGETS ×8", size=19, weight=740, family=MONO, spacing=.3),
             *children,
-            _text(1190, 430, "default / worker / explorer / reviewer", size=12, color=PALETTE["muted"], family=MONO),
-            _text(1190, 454, "NATIVE CODEX • RESPONSES API", size=11, color=PALETTE["verified"], family=MONO),
-            _text(1190, 476, "CHAT COMPLETIONS • deepseek-v4-pro", size=11, color=PALETTE["verified"], family=MONO),
+            _text(1190, 430, "MODEL + CREDENTIAL + CAPABILITIES", size=12, color=PALETTE["muted"], family=MONO),
+            _text(1190, 454, "DEEPSEEK • ANTHROPIC MESSAGES", size=11, color=PALETTE["verified"], family=MONO),
+            _text(1190, 476, "OPENAI-COMPATIBLE • NATIVE", size=11, color=PALETTE["verified"], family=MONO),
             f'<path d="M314 310H374" fill="none" stroke="{PALETTE["route"]}" stroke-width="3" marker-end="url(#arrowRoute)"/>',
             f'<path d="M676 310H708" fill="none" stroke="{PALETTE["route"]}" stroke-width="3" marker-end="url(#arrowRoute)"/>',
             f'<path d="M1078 310H1132" fill="none" stroke="{PALETTE["route"]}" stroke-width="3" marker-end="url(#arrowRoute)"/>',
@@ -329,25 +329,25 @@ def architecture_svg() -> str:
             _text(512, 588, "SAFE PROGRESS", size=12, color=PALETTE["verified"], weight=700, family=MONO, anchor="middle", spacing=.8),
             _text(58, 686, "PRIVATE REASONING", size=12, color=PALETTE["muted"], weight=700, family=MONO, spacing=1),
             _text(58, 716, "Sealed only for continuation; never shown as a fabricated transcript.", size=16, color=PALETTE["text"], family=MONO),
-            _text(1542, 724, "codex-multi-relay", size=13, color=PALETTE["muted"], family=MONO, anchor="end", spacing=1.1),
+            _text(1542, 724, "multi-relay", size=13, color=PALETTE["muted"], family=MONO, anchor="end", spacing=1.1),
         )
     )
     return _document(
         1600,
         780,
-        "Codex Multi Relay architecture",
-        "Four stages show the Codex parent, visible handoff, protocol relay, and native or custom model providers returning tool results safely.",
+        "Multi Relay architecture",
+        "Codex and Claude Code use a loopback gateway, target pools, operating-system vault credentials, and protocol adapters.",
         body,
     )
 
 
 def workflow_svg() -> str:
     steps = (
-        ("01", "CREDENTIAL", "system credential store", "PROVIDER SCOPED"),
-        ("02", "MODEL PROBE", "provider catalog", "EXACT MODEL"),
-        ("03", "TRANSACTION", "atomic catalog apply", "BACKUP FIRST"),
-        ("04", "CAPABILITY ROUTE", "VISION • AUDIO • WEB", "HIGH-RISK → TRUST"),
-        ("05", "VERIFY", "parent owns final check", "READY"),
+        ("01", "SELECT POOL", "sticky or timed", "CAPABILITY FILTER"),
+        ("02", "ATTEMPT TARGET", "model + credential", "NO OUTPUT YET"),
+        ("03", "PRE-COMMIT", "retryable failure", "ROTATE TARGET"),
+        ("04", "COMMITTED", "first visible output", "BOUNDARY CROSSED"),
+        ("05", "POST-COMMIT", "stream failure", "TERMINATE"),
     )
     cards: list[str] = []
     arrows: list[str] = []
@@ -355,9 +355,18 @@ def workflow_svg() -> str:
     for index, ((number, title, subtitle, footer), x) in enumerate(
         zip(steps, x_positions)
     ):
-        final = index == 4
-        border = PALETTE["verified"] if final else PALETTE["muted"]
-        title_color = PALETTE["verified"] if final else PALETTE["text"]
+        final = index == 3
+        terminal = index == 4
+        border = (
+            PALETTE["failure"]
+            if terminal
+            else (PALETTE["verified"] if final else PALETTE["muted"])
+        )
+        title_color = (
+            PALETTE["failure"]
+            if terminal
+            else (PALETTE["verified"] if final else PALETTE["text"])
+        )
         cards.extend(
             (
                 f'<g transform="translate({x} 164)">',
@@ -366,7 +375,7 @@ def workflow_svg() -> str:
                 f'  {_text(22, 72, title, size=20, color=title_color, weight=740, family=MONO, spacing=.3)}',
                 f'  {_text(22, 104, subtitle, size=13, color=PALETTE["muted"], family=MONO)}',
                 f'  <path d="M22 122H238" stroke="{PALETTE["muted"]}" stroke-opacity=".20"/>',
-                f'  {_text(22, 148, footer, size=11, color=PALETTE["verified"] if final else PALETTE["route"], weight=700, family=MONO, spacing=.8)}',
+                f'  {_text(22, 148, footer, size=11, color=PALETTE["failure"] if terminal else (PALETTE["verified"] if final else PALETTE["route"]), weight=700, family=MONO, spacing=.8)}',
                 "</g>",
             )
         )
@@ -378,27 +387,29 @@ def workflow_svg() -> str:
         (
             f'<rect width="1600" height="460" rx="30" fill="{PALETTE["ink"]}"/>',
             '<rect width="1600" height="460" rx="30" fill="url(#grid)"/>',
-            _text(54, 62, "Configure once. Prove every boundary.", size=36, weight=760, spacing=-.5),
-            _text(54, 98, "A guarded install path with an automatic way back.", size=16, color=PALETTE["muted"], family=MONO),
-            _chip(1260, 48, 284, "TRANSACTIONAL • VERIFIED", color=PALETTE["verified"]),
+            _text(54, 62, "Rotate before commit. Stop after commit.", size=36, weight=760, spacing=-.5),
+            _text(54, 98, "Fail over only while the response can still be replaced safely.", size=16, color=PALETTE["muted"], family=MONO),
+            _chip(1260, 48, 284, "COMMIT-AWARE • FAIL CLOSED", color=PALETTE["verified"]),
             *cards,
             *arrows,
-            f'<path data-route="rollback" d="M1408 328V348" fill="none" stroke="{PALETTE["warning"]}" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrowWarning)"/>',
-            '<g transform="translate(1278 354)" data-component="rollback-card">',
+            f'<path data-route="precommit-rotate" d="M796 328V348" fill="none" stroke="{PALETTE["warning"]}" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrowWarning)"/>',
+            '<g transform="translate(666 354)" data-component="rotation-card">',
             f'  <rect width="260" height="58" rx="16" fill="{PALETTE["warning"]}" fill-opacity=".08" stroke="{PALETTE["warning"]}" stroke-opacity=".50"/>',
-            f'  {_text(20, 23, "ANY FAILURE", size=10, color=PALETTE["warning"], weight=700, family=MONO, spacing=.8)}',
-            f'  {_text(20, 46, "ROLLBACK", size=15, color=PALETTE["warning"], weight=760, family=MONO, spacing=1)}',
-            f'  {_text(238, 37, "AUTO RESTORE", size=10, color=PALETTE["muted"], weight=700, family=MONO, anchor="end", spacing=.6)}',
+            f'  {_text(20, 23, "BEFORE COMMIT", size=10, color=PALETTE["warning"], weight=700, family=MONO, spacing=.8)}',
+            f'  {_text(20, 46, "TRY NEXT TARGET", size=15, color=PALETTE["warning"], weight=760, family=MONO, spacing=.6)}',
+            f'  {_text(238, 37, "SAFE REPLACE", size=10, color=PALETTE["muted"], weight=700, family=MONO, anchor="end", spacing=.6)}',
             "</g>",
-            _text(54, 404, "CREDENTIAL → MODEL PROBE → TRANSACTION → CAPABILITY ROUTING → VERIFY", size=13, color=PALETTE["muted"], family=MONO, spacing=.5),
-            _text(1546, 438, "codex-multi-relay", size=12, color=PALETTE["muted"], family=MONO, anchor="end", spacing=1),
+            f'<path data-component="commit-barrier" d="M1258 144V334" stroke="{PALETTE["verified"]}" stroke-width="2" stroke-dasharray="5 7" opacity=".72"/>',
+            _text(1250, 130, "COMMIT BARRIER", size=10, color=PALETTE["verified"], weight=700, family=MONO, anchor="end", spacing=.7),
+            _text(54, 404, "POOL → TARGET → PRE-COMMIT ROTATION → COMMIT → TERMINATE ON STREAM FAILURE", size=13, color=PALETTE["muted"], family=MONO, spacing=.5),
+            _text(1546, 438, "multi-relay", size=12, color=PALETTE["muted"], family=MONO, anchor="end", spacing=1),
         )
     )
     return _document(
         1600,
         460,
-        "Relay setup and verification workflow",
-        "Provider-scoped credential storage, model probing, transactional catalog installation, capability routing, verification, and automatic rollback.",
+        "Multi Relay commit-aware rotation workflow",
+        "Retryable failures rotate before visible output; failures after the response commits terminate without cross-model continuation.",
         body,
         defs=f"""    <marker id="arrowWarning" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
       <path d="M0 0L10 5L0 10Z" fill="{PALETTE["warning"]}"/>
@@ -417,21 +428,21 @@ def social_preview_svg() -> str:
             f'<rect width="1280" height="640" fill="{PALETTE["ink"]}"/>',
             '<rect width="1280" height="640" fill="url(#grid)"/>',
             '<circle cx="900" cy="320" r="270" fill="url(#relayGlow)"/>',
-            _chip(66, 66, 238, "MULTI-PROVIDER • AUDITED", color=PALETTE["verified"]),
-            _text(66, 190, "Codex", size=72, weight=780, spacing=-1.7),
-            _text(66, 268, "Multi Relay", size=72, color=PALETTE["route"], weight=780, spacing=-1.8),
-            _text(68, 326, "Capability routing for Codex child agents.", size=24, weight=600),
-            _text(68, 365, "Native and custom models. Parent boundaries intact.", size=17, color=PALETTE["muted"], family=MONO),
+            _chip(66, 66, 238, "MULTI-HOST • MULTI-PROVIDER", color=PALETTE["verified"]),
+            _text(66, 190, "Multi", size=72, weight=780, spacing=-1.7),
+            _text(66, 268, "Relay", size=72, color=PALETTE["route"], weight=780, spacing=-1.8),
+            _text(68, 326, "Pooled model and credential routing.", size=24, weight=600),
+            _text(68, 365, "Codex + Claude Code. One local gateway.", size=17, color=PALETTE["muted"], family=MONO),
             _chip(66, 430, 126, "CATALOG", color=PALETTE["route"]),
             _chip(206, 430, 142, "BOUNDARIES", color=PALETTE["route"]),
             _chip(362, 430, 136, "VERIFIED", color=PALETTE["verified"]),
-            _text(68, 566, "codex-multi-relay", size=14, color=PALETTE["muted"], family=MONO, spacing=1.3),
+            _text(68, 566, "multi-relay", size=14, color=PALETTE["muted"], family=MONO, spacing=1.3),
             f'<rect x="694" y="82" width="520" height="476" rx="28" fill="{PALETTE["panel"]}" stroke="{PALETTE["muted"]}" stroke-opacity=".28"/>',
             '<rect x="694" y="82" width="520" height="476" rx="28" fill="url(#grid)"/>',
             _text(724, 120, "SIGNAL MAP // ×8", size=13, color=PALETTE["route"], weight=700, family=MONO, spacing=1),
             f'<rect x="724" y="276" width="128" height="88" rx="16" fill="{PALETTE["ink"]}" stroke="{PALETTE["muted"]}" stroke-opacity=".35"/>',
-            _text(788, 311, "CODEX", size=15, weight=740, family=MONO, anchor="middle", spacing=.8),
-            _text(788, 337, "PARENT", size=12, color=PALETTE["muted"], family=MONO, anchor="middle", spacing=.8),
+            _text(788, 311, "HOSTS", size=15, weight=740, family=MONO, anchor="middle", spacing=.8),
+            _text(788, 337, "CODEX + CLAUDE", size=10, color=PALETTE["muted"], family=MONO, anchor="middle", spacing=.3),
             f'<path d="M852 320H886" stroke="{PALETTE["route"]}" stroke-width="4" marker-end="url(#arrowRoute)"/>',
             _relay_gate(900, 182, 108, 276, id_label="Relay mark with eight verified outputs"),
             f'<path d="M1008 320H1042M1042 154V490" stroke="{PALETTE["route"]}" stroke-width="3" fill="none"/>',
@@ -442,8 +453,8 @@ def social_preview_svg() -> str:
     return _document(
         1280,
         640,
-        "Codex Multi Relay social preview",
-        "Repository social card showing one Codex parent routing tasks across eight bounded native and custom model slots.",
+        "Multi Relay social preview",
+        "Repository social card showing Codex and Claude Code routing through pooled provider targets.",
         body,
     )
 
@@ -454,13 +465,13 @@ def relay_mark_svg() -> str:
             f'<rect width="512" height="512" rx="104" fill="{PALETTE["ink"]}"/>',
             f'<rect x="18" y="18" width="476" height="476" rx="88" fill="{PALETTE["panel"]}" stroke="{PALETTE["muted"]}" stroke-opacity=".24"/>',
             '<circle cx="264" cy="256" r="212" fill="url(#relayGlow)"/>',
-            _relay_gate(76, 92, 356, 328, id_label="Codex Multi Relay project mark"),
+            _relay_gate(76, 92, 356, 328, id_label="Multi Relay project mark"),
         )
     )
     return _document(
         512,
         512,
-        "Codex Multi Relay mark",
+        "Multi Relay mark",
         "A project-owned relay gate with one incoming route and eight verified outputs.",
         body,
     )
