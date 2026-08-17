@@ -63,7 +63,7 @@ class ClaudeCodeHostAdapterTests(unittest.TestCase):
 
     def test_user_and_project_scopes_choose_exact_agent_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             paths = self.make_paths(root)
             user_plan = ClaudeCodeHostAdapter(paths).plan(claude_catalog(scope="user"))
             project = root / "project"

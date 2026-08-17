@@ -411,7 +411,7 @@ class CatalogSchema2MigrationTests(unittest.TestCase):
 
     def test_concurrent_source_change_is_detected_and_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             source = root / "catalog.json"
             backup_root = root / "backups"
             old_bytes = json.dumps(legacy_catalog(), ensure_ascii=False).encode("utf-8")

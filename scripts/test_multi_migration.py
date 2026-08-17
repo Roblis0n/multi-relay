@@ -200,7 +200,7 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
     def test_manager_transaction_migrates_schema1_and_records_backup_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             paths = resolve_paths(str(home))
             (home / "config.toml").write_text(
                 'model = "gpt-5.6-sol"\n',
@@ -254,7 +254,7 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
     def test_apply_uses_one_schema1_read_for_catalog_and_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             paths = resolve_paths(str(home))
             (home / "config.toml").write_text(
                 'model = "gpt-5.6-sol"\n',
@@ -298,7 +298,7 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
     def test_schema1_catalog_in_prior_state_directory_is_adopted_transactionally(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             paths = resolve_paths(str(home))
             (home / "config.toml").write_text(
                 'model = "gpt-5.6-sol"\n',
@@ -343,7 +343,7 @@ class MultiRelayMigrationTests(unittest.TestCase):
 
     def test_enable_persists_schema1_migration_before_enabling_roles(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             paths = resolve_paths(str(home))
             (home / "config.toml").write_text(
                 'model = "gpt-5.6-sol"\n',

@@ -77,7 +77,7 @@ class AdapterRequestTests(unittest.TestCase):
 
     def test_installed_catalog_path_honors_explicit_home_and_legacy_location(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
+            home = Path(directory).resolve()
             legacy = home / "codex-deepseek-relay" / "catalog.json"
             legacy.parent.mkdir(parents=True)
             legacy.write_text("{}", encoding="utf-8")
