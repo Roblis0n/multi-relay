@@ -5,12 +5,14 @@ from __future__ import annotations
 import re
 
 from .catalog import Catalog, default_catalog
+from .branding import OWNERSHIP_MARKER
 from .errors import ManagerError
 
 
-INSTRUCTIONS_BEGIN = "<!-- BEGIN CODEX-MULTI-RELAY -->"
-INSTRUCTIONS_END = "<!-- END CODEX-MULTI-RELAY -->"
+INSTRUCTIONS_BEGIN = f"<!-- BEGIN {OWNERSHIP_MARKER} -->"
+INSTRUCTIONS_END = f"<!-- END {OWNERSHIP_MARKER} -->"
 LEGACY_INSTRUCTION_MARKERS = (
+    ("<!-- BEGIN CODEX-MULTI-RELAY -->", "<!-- END CODEX-MULTI-RELAY -->"),
     ("<!-- BEGIN CODEX-DEEPSEEK-FANOUT -->", "<!-- END CODEX-DEEPSEEK-FANOUT -->"),
 )
 

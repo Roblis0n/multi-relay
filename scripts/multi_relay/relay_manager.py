@@ -1,4 +1,4 @@
-"""Transactional lifecycle management for Codex Multi Relay."""
+"""Transactional lifecycle management for Multi Relay."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .bridge import stop_bridge
+from .branding import CLI_NAME, PRODUCT_VERSION, REPOSITORY_NAME
 from .catalog import (
     AgentSpec,
     Catalog,
@@ -203,13 +204,24 @@ class RelayManager:
         return self.paths.state_dir / "backups" / f"{stamp}-{operation}"
 
     def _read_manifest(self) -> tuple[dict[str, Any], Path]:
-        for path in (
+        candidates = (
             self.paths.manifest,
+            self.paths.codex_manifest,
             self.paths.relay_manifest,
             self.paths.legacy_manifest,
-        ):
-            if path.exists():
-                return _read_json(path), path
+        )
+        existing = [path for path in candidates if path.exists()]
+        if len(existing) > 1:
+            hashes = {_sha256(path.read_bytes()) for path in existing if path.is_file()}
+            if any(not path.is_file() for path in existing) or len(hashes) != 1:
+                raise ManagerError(
+                    "state_conflict",
+                    "Canonical and legacy Multi Relay state both exist with different manifests.",
+                    {"paths": [str(path) for path in existing]},
+                )
+        if existing:
+            path = existing[0]
+            return _read_json(path), path
         return {}, self.paths.manifest
 
     def _catalog_source(self, manifest_source: Path) -> Path:
@@ -256,7 +268,14 @@ class RelayManager:
         try:
             return path.resolve().relative_to(self.paths.home).as_posix()
         except ValueError:
-            raise ManagerError("unsafe_target", "A managed path escaped Codex Home.") from None
+            try:
+                relative = path.resolve().relative_to(self.paths.state_dir)
+            except ValueError:
+                raise ManagerError(
+                    "unsafe_target",
+                    "A managed path escaped the host and product state roots.",
+                ) from None
+            return f"@state/{relative.as_posix()}"
 
     def _default_selection(
         self,
@@ -264,7 +283,7 @@ class RelayManager:
         *,
         auth_command: list[str] | None = None,
     ) -> ModelSelection:
-        with tempfile.TemporaryDirectory(prefix="codex-multi-relay-effort-") as directory:
+        with tempfile.TemporaryDirectory(prefix=f"{CLI_NAME}-effort-") as directory:
             home = Path(directory).resolve()
             (home / "config.toml").write_text(
                 apply_codex_config(
@@ -619,6 +638,8 @@ class RelayManager:
         }
         managed[self._relative(self.paths.catalog)] = _sha256(catalog_bytes)
         payload: dict[str, Any] = {
+            "product": REPOSITORY_NAME,
+            "product_version": PRODUCT_VERSION,
             "schema_version": SCHEMA_VERSION,
             "catalog_schema_version": catalog.schema_version,
             "status": status,

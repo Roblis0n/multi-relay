@@ -1,4 +1,4 @@
-"""Domain errors returned by Codex Multi Relay."""
+"""Domain errors returned by Multi Relay."""
 
 from __future__ import annotations
 

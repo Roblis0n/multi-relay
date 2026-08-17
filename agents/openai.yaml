@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex Multi Relay"
-  short_description: "按能力安全路由 Codex 的多模型子代理"
-  default_prompt: "Use $codex-multi-relay to configure, route, and verify multi-provider child agents while preserving parent-only capability boundaries."
+  display_name: "Multi Relay"
+  short_description: "跨 Codex 与 Claude Code 路由多模型代理"
+  default_prompt: "Use $multi-relay to configure, route, rotate, and verify multi-provider agents across supported hosts."

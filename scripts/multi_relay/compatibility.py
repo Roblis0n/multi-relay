@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .credentials import provider_auth_command
+from .branding import CLI_NAME
 from .errors import ManagerError
 from .model_capabilities import EFFORT_PREFERENCE, ModelSelection
 from .paths import resolve_paths
@@ -29,13 +30,16 @@ class CompatibilityReport:
     resume_passed: bool | None
     child_metadata_passed: bool | None
     parent_unchanged: bool | None
+    legacy_assets: tuple[str, ...] = ()
+    migration_actions: tuple[str, ...] = ()
 
     def as_checks(self) -> dict[str, bool]:
         values = asdict(self)
         return {
             key: bool(value)
             for key, value in values.items()
-            if key not in {"model", "effort"} and value is not None
+            if key not in {"model", "effort", "legacy_assets", "migration_actions"}
+            and value is not None
         }
 
 
@@ -188,7 +192,7 @@ def run_isolated_gate(
     if not config_path.is_file():
         raise ManagerError("config_missing", "Codex config.toml was not found.")
     minimal_parent, parent = _isolated_parent_config(selection)
-    with tempfile.TemporaryDirectory(prefix="codex-multi-relay-gate-") as directory:
+    with tempfile.TemporaryDirectory(prefix=f"{CLI_NAME}-gate-") as directory:
         home = Path(directory).resolve()
         paths = resolve_paths(str(home))
         candidate = apply_codex_config(

@@ -9,14 +9,19 @@ from collections.abc import Callable
 from typing import Any
 
 from .bridge import BRIDGE_BASE_URL
+from .branding import OWNERSHIP_MARKER
 from .catalog import Catalog
 from .errors import ManagerError
 from .gateway import GATEWAY_BASE_URL
 
 
-PROVIDER_BEGIN = "# BEGIN CODEX-MULTI-RELAY PROVIDERS"
-PROVIDER_END = "# END CODEX-MULTI-RELAY PROVIDERS"
+PROVIDER_BEGIN = f"# BEGIN {OWNERSHIP_MARKER} PROVIDERS"
+PROVIDER_END = f"# END {OWNERSHIP_MARKER} PROVIDERS"
 LEGACY_PROVIDER_MARKERS = (
+    (
+        "# BEGIN CODEX-MULTI-RELAY PROVIDERS",
+        "# END CODEX-MULTI-RELAY PROVIDERS",
+    ),
     (
         "# BEGIN CODEX-DEEPSEEK-FANOUT PROVIDER",
         "# END CODEX-DEEPSEEK-FANOUT PROVIDER",
@@ -195,9 +200,9 @@ def build_provider_blocks(
 
 
 def build_provider_block(auth_command: list[str]) -> str:
-    """Render the command-authenticated DeepSeek Responses provider."""
+    """Render the command-authenticated DeepSeek preset provider."""
 
-    begin, end = LEGACY_PROVIDER_MARKERS[0]
+    begin, end = PROVIDER_BEGIN, PROVIDER_END
     auth_lines = _provider_auth_lines(auth_command)
     return (
         f"{begin}\n"

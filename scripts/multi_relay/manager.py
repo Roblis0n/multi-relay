@@ -1,4 +1,4 @@
-"""Stable lifecycle imports for Codex Multi Relay."""
+"""Stable lifecycle imports for Multi Relay."""
 
 from .relay_manager import DEFAULT_CONCURRENCY, SCHEMA_VERSION, RelayManager
 from .hosts.claude_code import launch_claude_code

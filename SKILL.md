@@ -1,11 +1,11 @@
 ---
-name: codex-multi-relay
-description: Use when a user asks to configure, validate, route, test, repair, disable, enable, migrate, or uninstall Codex multi-provider child agents, including custom models, capability boundaries, provider credentials, or DeepSeek workers.
+name: multi-relay
+description: Use when a user asks to configure, validate, route, rotate, test, repair, disable, enable, migrate, or uninstall Multi Relay multi-provider credentials, targets, pools, or agents for Codex and Claude Code.
 ---
 
-# Codex Multi Relay
+# Multi Relay
 
-为 Codex 配置可审计的多模型子代理目录。只在用户管理 Relay、选择子代理模型、诊断路由或处理迁移时使用；普通编码任务不重复运行本 Skill。
+为 Codex 与 Claude Code 配置多 Provider、多模型的代理路由。只在用户管理 Relay、目标池、凭据、宿主或迁移时使用；普通编码任务不重复运行本 Skill。
 
 ## 核心契约
 

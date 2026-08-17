@@ -392,7 +392,8 @@ class MultiRelayMigrationTests(unittest.TestCase):
             root = Path(directory).resolve()
             paths = resolve_paths(directory)
 
-        self.assertEqual(paths.state_dir, root / "codex-multi-relay")
+        self.assertEqual(paths.state_dir, root / "multi-relay")
+        self.assertEqual(paths.codex_state_dir, root / "codex-multi-relay")
         self.assertEqual(paths.catalog, paths.state_dir / "catalog.json")
         self.assertEqual(paths.relay_state_dir, root / "codex-deepseek-relay")
         self.assertEqual(paths.relay_manifest, paths.relay_state_dir / "manifest.json")

@@ -31,6 +31,7 @@ ALLOWED = {
     "migration.py": set(FORBIDDEN),
     "compatibility.py": {"model_catalog_json"},
     "paths.py": {"codex-deepseek-relay", "codex-deepseek-subagent"},
+    "branding.py": {"codex-deepseek-relay", "codex-deepseek-subagent"},
     "instructions.py": {"CODEX-DEEPSEEK-FANOUT"},
     "toml_config.py": {"CODEX-DEEPSEEK-FANOUT"},
     "credentials.py": {"codex-deepseek-api-key"},

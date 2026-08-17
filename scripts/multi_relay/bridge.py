@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Loopback Responses-to-Chat bridge for Codex Multi Relay providers."""
+"""Loopback Responses-to-Chat compatibility bridge for Multi Relay providers."""
 
 from __future__ import annotations
 
@@ -29,16 +29,21 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from multi_relay.catalog import Catalog, ProviderSpec, load_catalog
     from multi_relay.errors import ManagerError
+    from multi_relay.branding import PRODUCT_VERSION, USER_AGENT
+    from multi_relay.paths import resolve_paths
 else:
     from .catalog import Catalog, ProviderSpec, load_catalog
     from .errors import ManagerError
+    from .branding import PRODUCT_VERSION, USER_AGENT
+    from .paths import resolve_paths
 
 
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 42137
 BRIDGE_BASE_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/v1"
 BRIDGE_HEALTH_URL = f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/health"
-BRIDGE_SERVICE = "codex-multi-relay-chat-bridge"
+BRIDGE_SERVICE = "multi-relay-chat-bridge"
+FORMER_BRIDGE_SERVICE = "codex-multi-relay-chat-bridge"
 LEGACY_BRIDGE_SERVICE = "codex-deepseek-responses-bridge"
 BRIDGE_VERSION = 3
 DEEPSEEK_CHAT_URL = "https://api.deepseek.com/chat/completions"
@@ -46,7 +51,8 @@ REQUIRED_MODEL = "deepseek-v4-pro"
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 MAX_UPSTREAM_ERROR_BYTES = 1024 * 1024
 MAX_TOOLS = 128
-_REASONING_PREFIX = "cmr1:"
+_REASONING_PREFIX = "mr1:"
+_FORMER_REASONING_PREFIX = "cmr1:"
 _LEGACY_REASONING_PREFIX = "dsr1:"
 _VALID_TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 _HANDOFF_START = re.compile(
@@ -509,6 +515,15 @@ def _agent_message_content(
 
 def _reasoning_key(secret: str, provider_id: str) -> bytes:
     return hashlib.sha256(
+        b"multi-relay-reasoning-v1\0"
+        + provider_id.encode("utf-8")
+        + b"\0"
+        + secret.encode("utf-8")
+    ).digest()
+
+
+def _former_reasoning_key(secret: str, provider_id: str) -> bytes:
+    return hashlib.sha256(
         b"codex-multi-relay-reasoning-v1\0"
         + provider_id.encode("utf-8")
         + b"\0"
@@ -563,7 +578,7 @@ def _open_reasoning(
     allow_legacy: bool | None = None,
 ) -> str | None:
     if not isinstance(value, str) or not value.startswith(
-        (_REASONING_PREFIX, _LEGACY_REASONING_PREFIX)
+        (_REASONING_PREFIX, _FORMER_REASONING_PREFIX, _LEGACY_REASONING_PREFIX)
     ):
         return None
     if not secret:
@@ -572,7 +587,11 @@ def _open_reasoning(
         prefix = (
             _REASONING_PREFIX
             if value.startswith(_REASONING_PREFIX)
-            else _LEGACY_REASONING_PREFIX
+            else (
+                _FORMER_REASONING_PREFIX
+                if value.startswith(_FORMER_REASONING_PREFIX)
+                else _LEGACY_REASONING_PREFIX
+            )
         )
         sealed = base64.urlsafe_b64decode(value[len(prefix) :].encode("ascii"))
     except (ValueError, UnicodeEncodeError):
@@ -588,6 +607,8 @@ def _open_reasoning(
                 "Legacy DeepSeek reasoning cannot be replayed through another provider.",
             )
         key = _legacy_reasoning_key(secret)
+    elif prefix == _FORMER_REASONING_PREFIX:
+        key = _former_reasoning_key(secret, provider_id)
     else:
         key = _reasoning_key(secret, provider_id)
     expected = hmac.new(key, b"tag\0" + nonce + ciphertext, hashlib.sha256).digest()[:16]
@@ -1595,7 +1616,7 @@ class _BridgeServer(ThreadingHTTPServer):
 
 class _BridgeHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "CodexMultiRelayBridge/3"
+    server_version = f"MultiRelayBridge/{PRODUCT_VERSION}"
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -1631,8 +1652,10 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/_shutdown":
             expected = str(os.getpid())
-            supplied = self.headers.get("X-Codex-Multi-Relay-Bridge-Pid") or self.headers.get(
-                "X-Codex-DeepSeek-Bridge-Pid"
+            supplied = (
+                self.headers.get("X-Multi-Relay-Bridge-Pid")
+                or self.headers.get("X-Codex-Multi-Relay-Bridge-Pid")
+                or self.headers.get("X-Codex-DeepSeek-Bridge-Pid")
             )
             if supplied != expected:
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "forbidden"})
@@ -1687,7 +1710,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
-            "User-Agent": "codex-multi-relay-chat-bridge/3",
+            "User-Agent": USER_AGENT,
         }
         if route.provider.auth == "vault":
             headers["Authorization"] = authorization
@@ -1846,16 +1869,15 @@ def ensure_bridge(timeout: float = 5.0, *, codex_home: Path | None = None) -> No
 
 def _stop_bridge_health(current: dict[str, Any]) -> bool:
     service = current.get("service")
-    if service not in {BRIDGE_SERVICE, LEGACY_BRIDGE_SERVICE}:
+    if service not in {BRIDGE_SERVICE, FORMER_BRIDGE_SERVICE, LEGACY_BRIDGE_SERVICE}:
         return False
     pid = current.get("pid")
     if not isinstance(pid, int):
         return False
-    header = (
-        "X-Codex-DeepSeek-Bridge-Pid"
-        if service == LEGACY_BRIDGE_SERVICE
-        else "X-Codex-Multi-Relay-Bridge-Pid"
-    )
+    header = {
+        LEGACY_BRIDGE_SERVICE: "X-Codex-DeepSeek-Bridge-Pid",
+        FORMER_BRIDGE_SERVICE: "X-Codex-Multi-Relay-Bridge-Pid",
+    }.get(service, "X-Multi-Relay-Bridge-Pid")
     request = urllib.request.Request(
         f"http://{BRIDGE_HOST}:{BRIDGE_PORT}/_shutdown",
         data=b"{}",
@@ -1879,10 +1901,12 @@ def stop_bridge() -> bool:
 
 
 def _installed_catalog_path(codex_home: Path | None = None) -> Path | None:
-    home = codex_home or Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    paths = resolve_paths(str(codex_home) if codex_home is not None else None)
     for path in (
-        home / "codex-multi-relay" / "catalog.json",
-        home / "codex-deepseek-relay" / "catalog.json",
+        paths.catalog,
+        paths.codex_state_dir / "catalog.json",
+        paths.relay_state_dir / "catalog.json",
+        paths.legacy_state_dir / "catalog.json",
     ):
         if path.is_file():
             return path

@@ -4,7 +4,7 @@
   <img src="./assets/readme/hero.png" width="100%" alt="Codex 父任务按能力路由到多模型子代理，联网、视觉、音频和高风险任务保留在主代理">
 </p>
 
-<h1 align="center">Codex Multi Relay</h1>
+<h1 align="center">Multi Relay</h1>
 
 <p align="center">为每个 Codex 子代理选择合适的 Provider 与模型，同时给主代理保留明确的能力边界。</p>
 
@@ -38,7 +38,7 @@
 如果作为 Skill 安装：
 
 ```bash
-npx skills add Roblis0n/codex-multi-relay -g -y
+npx skills add Roblis0n/multi-relay -g -y
 ```
 
 也可以在项目目录双击 `configure-multi-relay.cmd`，安装默认混合目录。

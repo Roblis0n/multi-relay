@@ -31,6 +31,7 @@ if __package__ in {None, ""}:
     __package__ = "multi_relay"
 
 from .canonical import CanonicalEvent, CanonicalRequest, EventKind
+from .branding import MANAGEMENT_PREFIX
 from .catalog import Catalog, CredentialRef, ExecutionTarget, load_catalog
 from .credentials import (
     VaultLocator,
@@ -1125,7 +1126,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             if path == "/v1/models":
                 self._send_json(200, self.app.model_listing())
                 return
-            if path == "/_multi-relay/pools":
+            if path == f"{MANAGEMENT_PREFIX}/pools":
                 state = self.app.rotation.store.load(self.app.rotation.catalog_hash)
                 self._send_json(
                     200,
@@ -1152,7 +1153,7 @@ class _GatewayHandler(BaseHTTPRequestHandler):
         try:
             self._validate_transport()
             path = urllib.parse.urlsplit(self.path).path
-            if path == "/_shutdown":
+            if path in {f"{MANAGEMENT_PREFIX}/shutdown", "/_shutdown"}:
                 self.app.authenticate_shutdown(self.headers)
                 self._body()
                 self._send_json(200, {"status": "stopping"})
@@ -1400,7 +1401,7 @@ class GatewayController:
         if self._shutdown_token is None:
             return False
         request = urllib.request.Request(
-            f"http://{self.host}:{self.port}/_shutdown",
+            f"http://{self.host}:{self.port}{MANAGEMENT_PREFIX}/shutdown",
             data=b"{}",
             headers={
                 "Content-Type": "application/json",

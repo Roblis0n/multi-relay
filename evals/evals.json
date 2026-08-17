@@ -1,9 +1,9 @@
 {
-  "skill_name": "codex-multi-relay",
+  "skill_name": "multi-relay",
   "evals": [
     {
       "id": 1,
-      "prompt": "帮我 setup Codex Multi Relay，使用混合预设并允许多代理并发。",
+      "prompt": "帮我 setup Multi Relay，使用混合预设并允许多代理并发。",
       "expected_output": "先运行 status --json，再运行 setup --preset hybrid --json。Key 由本机掩码输入框收集；在线确认 deepseek-v4-pro 后配置 DeepSeek default、worker、explorer 与原生 reviewer，允许最多 8 路 fan-out，并保持主模型不变。",
       "files": []
     },

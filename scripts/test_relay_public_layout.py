@@ -42,16 +42,16 @@ class RelayPublicLayoutTests(unittest.TestCase):
         match = re.match(r"^---\nname: ([^\n]+)\n", skill)
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group(1), "codex-multi-relay")
+        self.assertEqual(match.group(1), "multi-relay")
 
         agent = (ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("Codex Multi Relay", agent)
-        self.assertIn("$codex-multi-relay", agent)
+        self.assertIn("Multi Relay", agent)
+        self.assertIn("$multi-relay", agent)
         self.assertNotIn("$codex-deepseek-relay", agent)
         self.assertNotIn("$codex-deepseek-subagent", agent)
 
         evals = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
-        self.assertEqual(evals["skill_name"], "codex-multi-relay")
+        self.assertEqual(evals["skill_name"], "multi-relay")
 
         license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
         self.assertIn("Copyright (c) 2026 Roblis0n", license_text)

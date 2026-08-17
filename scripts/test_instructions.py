@@ -27,8 +27,8 @@ class FanoutInstructionTests(unittest.TestCase):
 
         self.assertEqual(second, first)
         self.assertTrue(first.startswith(original.rstrip()))
-        self.assertEqual(first.count("<!-- BEGIN CODEX-MULTI-RELAY -->"), 1)
-        self.assertEqual(first.count("<!-- END CODEX-MULTI-RELAY -->"), 1)
+        self.assertEqual(first.count("<!-- BEGIN MULTI-RELAY -->"), 1)
+        self.assertEqual(first.count("<!-- END MULTI-RELAY -->"), 1)
 
     def test_remove_deletes_only_the_managed_block(self) -> None:
         original = "# My rules\n\nKeep this text.\n"
@@ -106,7 +106,7 @@ legacy managed text
         self.assertIn("# Keep", applied)
         self.assertNotIn("legacy managed text", applied)
         self.assertNotIn("BEGIN CODEX-DEEPSEEK-FANOUT", applied)
-        self.assertEqual(applied.count("BEGIN CODEX-MULTI-RELAY"), 1)
+        self.assertEqual(applied.count("BEGIN MULTI-RELAY"), 1)
 
 
 if __name__ == "__main__":

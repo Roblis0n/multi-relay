@@ -105,6 +105,7 @@ class ManagerTests(unittest.TestCase):
             existing_install = any(
                 (home / state / "manifest.json").exists()
                 for state in (
+                    "multi-relay",
                     "codex-multi-relay",
                     "codex-deepseek-relay",
                     "codex-deepseek-subagent",
@@ -139,7 +140,8 @@ class ManagerTests(unittest.TestCase):
         self.assertIsInstance(paths, Paths)
         self.assertEqual(paths.agents_dir, root / "agents")
         self.assertEqual(paths.instruction_file, root / "AGENTS.md")
-        self.assertEqual(paths.state_dir, root / "codex-multi-relay")
+        self.assertEqual(paths.state_dir, root / "multi-relay")
+        self.assertEqual(paths.codex_state_dir, root / "codex-multi-relay")
         self.assertEqual(paths.manifest, paths.state_dir / "manifest.json")
         self.assertEqual(paths.catalog, paths.state_dir / "catalog.json")
         self.assertEqual(paths.relay_state_dir, root / "codex-deepseek-relay")
@@ -260,7 +262,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "ready")
             self.assertEqual(manager.status()["status"], "ready")
             manifest = json.loads(
-                (home / "codex-multi-relay" / "manifest.json").read_text(
+                (home / "multi-relay" / "manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -270,7 +272,7 @@ class ManagerTests(unittest.TestCase):
             )
             self.assertTrue(all(manifest["compatibility"].values()))
             catalog = load_catalog(
-                home / "codex-multi-relay" / "catalog.json"
+                home / "multi-relay" / "catalog.json"
             )
             self.assertEqual(
                 {
@@ -356,7 +358,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(list((home / "agents").glob("*.toml")), [])
             self.assertFalse((home / "AGENTS.md").exists())
             self.assertFalse(
-                (home / "codex-multi-relay" / "manifest.json").exists()
+                (home / "multi-relay" / "manifest.json").exists()
             )
 
     def test_conflicting_user_owned_role_is_not_overwritten(self) -> None:
@@ -418,7 +420,7 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(parsed["model"], "gpt-5.6-sol")
             self.assertIs(parsed["features"]["multi_agent"], False)
             self.assertNotIn("model_providers", parsed)
-            self.assertFalse((home / "codex-multi-relay" / "manifest.json").exists())
+            self.assertFalse((home / "multi-relay" / "manifest.json").exists())
             self.assertEqual(store.remove_calls, 0)
             self.assertEqual(events[-1], "bridge_stop")
 
@@ -539,7 +541,7 @@ class ManagerTests(unittest.TestCase):
                 {path.name for path in (home / "agents").glob("*.toml")},
                 {"default.toml", "worker.toml", "explorer.toml", "reviewer.toml"},
             )
-            new_manifest_path = home / "codex-multi-relay" / "manifest.json"
+            new_manifest_path = home / "multi-relay" / "manifest.json"
             new_manifest = json.loads(new_manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(new_manifest["schema_version"], 5)
             self.assertIs(new_manifest["legacy_migrated"], True)

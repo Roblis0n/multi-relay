@@ -1,4 +1,4 @@
-"""Filesystem layout owned by Codex Multi Relay."""
+"""Filesystem layout owned by Multi Relay."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .branding import LEGACY_STATE_DIRECTORY_NAMES, STATE_DIRECTORY_NAME
+
 
 @dataclass(frozen=True)
 class Paths:
-    """User-level Codex paths, including ordered legacy read locations."""
+    """Host paths, product state, and ordered migration-only read locations."""
 
     home: Path
     config: Path
@@ -28,6 +30,26 @@ class Paths:
     runtime_state_lock: Path
     gateway_state: Path
     user_home: Path | None = None
+
+    @property
+    def codex_state_dir(self) -> Path:
+        """Former Codex-scoped Multi Relay state; migration reads only."""
+
+        return self.home / LEGACY_STATE_DIRECTORY_NAMES[0]
+
+    @property
+    def codex_manifest(self) -> Path:
+        return self.codex_state_dir / "manifest.json"
+
+    @property
+    def legacy_state_dirs(self) -> tuple[Path, ...]:
+        """Legacy state directories in newest-to-oldest precedence order."""
+
+        return (self.codex_state_dir, self.relay_state_dir, self.legacy_state_dir)
+
+    @property
+    def legacy_manifests(self) -> tuple[Path, ...]:
+        return tuple(path / "manifest.json" for path in self.legacy_state_dirs)
 
     @property
     def codex_host_manifest(self) -> Path:
@@ -64,6 +86,11 @@ def resolve_paths(
     user_home_injected = user_home is not None
     if state_home is not None:
         product_root = Path(state_home).expanduser().resolve()
+    elif codex_home is not None and user_home is None:
+        # An explicitly injected Codex home is an isolated test/project root.
+        # Keep its product state inside that disposable root instead of touching
+        # the real user's operating-system state directory.
+        product_root = home
     elif selected_platform in {"windows", "win32"}:
         product_root = Path(
             (None if user_home_injected else os.environ.get("LOCALAPPDATA"))
@@ -76,10 +103,10 @@ def resolve_paths(
             (None if user_home_injected else os.environ.get("XDG_STATE_HOME"))
             or selected_user_home / ".local" / "state"
         ).expanduser().resolve()
-    product_state_dir = product_root / "multi-relay"
-    state_dir = home / "codex-multi-relay"
-    relay_state_dir = home / "codex-deepseek-relay"
-    legacy_state_dir = home / "codex-deepseek-subagent"
+    product_state_dir = product_root / STATE_DIRECTORY_NAME
+    state_dir = product_state_dir
+    relay_state_dir = home / LEGACY_STATE_DIRECTORY_NAMES[1]
+    legacy_state_dir = home / LEGACY_STATE_DIRECTORY_NAMES[2]
     return Paths(
         home=home,
         config=home / "config.toml",

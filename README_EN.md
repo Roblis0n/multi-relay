@@ -4,7 +4,7 @@
   <img src="./assets/readme/hero.png" width="100%" alt="Codex parent routes work to multiple child-agent models while retaining web, vision, audio, and high-risk boundaries">
 </p>
 
-<h1 align="center">Codex Multi Relay</h1>
+<h1 align="center">Multi Relay</h1>
 
 <p align="center">Choose the right provider and model for each Codex child agent while preserving explicit parent capability boundaries.</p>
 
@@ -38,7 +38,7 @@ Requirements: Windows or macOS, Python 3.11+, and the Codex desktop runtime. Onl
 To install as a Skill:
 
 ```bash
-npx skills add Roblis0n/codex-multi-relay -g -y
+npx skills add Roblis0n/multi-relay -g -y
 ```
 
 You can also double-click `configure-multi-relay.cmd` in the project directory to install the default hybrid catalog.

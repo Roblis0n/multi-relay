@@ -1,4 +1,4 @@
-"""Command-line entrypoint for Codex Multi Relay."""
+"""Command-line entrypoint for Multi Relay."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import AgentSpec, Catalog, ExecutionTarget, ProviderSpec, TargetPool
+from .branding import CLI_NAME, PRODUCT_NAME
 from .credentials import prompt_and_store
 from .errors import ManagerError
 from .hosts.claude_code import launch_claude_code
@@ -46,8 +47,8 @@ def _common_parser() -> argparse.ArgumentParser:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="multi-relay",
-        description="Capability-aware child-agent routing across multiple model providers.",
+        prog=CLI_NAME,
+        description=f"{PRODUCT_NAME}: capability-aware routing across model providers and hosts.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     common = _common_parser()

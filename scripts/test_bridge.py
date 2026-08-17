@@ -191,7 +191,7 @@ class BridgeRequestTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            captured[0].get_header("X-codex-multi-relay-bridge-pid"),
+            captured[0].get_header("X-multi-relay-bridge-pid"),
             "101",
         )
         self.assertEqual(

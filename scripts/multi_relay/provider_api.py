@@ -9,11 +9,11 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from .catalog import ProviderSpec
+from .branding import USER_AGENT
+from .catalog import ProviderSpec, default_catalog
 from .errors import ManagerError
 
 
-REQUESTED_MODEL = "deepseek-v4-pro"
 MODELS_URL = "https://api.deepseek.com/models"
 MAX_RESPONSE_BYTES = 1_048_576
 
@@ -70,13 +70,15 @@ def _safe_urlopen(request: urllib.request.Request, *, timeout: float) -> Any:
 
 def discover_model(
     api_key: str,
-    requested: str = REQUESTED_MODEL,
+    requested: str | None = None,
     *,
     provider: ProviderSpec | None = None,
     opener: Callable[..., Any] | None = None,
 ) -> str:
     """Verify that the requested model is present in the authenticated catalog."""
 
+    if requested is None:
+        requested = default_catalog().target("deepseek-primary").model
     provider_name = provider.name if provider is not None else "DeepSeek"
     protocol = provider.protocol if provider is not None else "deepseek-chat"
     auth_mode = provider.auth if provider is not None else "vault"
@@ -101,7 +103,7 @@ def discover_model(
     )
     headers = {
         "Accept": "application/json",
-        "User-Agent": "codex-multi-relay/1",
+        "User-Agent": USER_AGENT,
     }
     if auth_mode == "vault":
         headers["Authorization"] = f"Bearer {api_key}"

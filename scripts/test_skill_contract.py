@@ -22,7 +22,7 @@ class SkillContractTests(unittest.TestCase):
 
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group(1), "codex-multi-relay")
+        self.assertEqual(match.group(1), "multi-relay")
         self.assertTrue(match.group(2).startswith("Use when "))
         self.assertIn("Codex", match.group(2))
         self.assertIn("multi-provider", match.group(2))
@@ -153,10 +153,10 @@ class SkillContractTests(unittest.TestCase):
             for name in ("README.md", "README_EN.md")
         )
 
-        self.assertIn("Codex Multi Relay", readmes[0])
+        self.assertIn("Multi Relay", readmes[0])
         legacy_public_repo = "Roblis0n/" + "codex-deepseek-" + "subagent"
         for text in readmes:
-            self.assertIn("Roblis0n/codex-multi-relay", text)
+            self.assertIn("Roblis0n/multi-relay", text)
             self.assertNotIn("Roblis0n/codex-deepseek-relay", text)
             self.assertNotIn(legacy_public_repo, text)
         self.assertFalse((ROOT / "GITHUB_UPLOAD.md").exists())
@@ -170,7 +170,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("[English](./README_EN.md)", chinese)
         self.assertIn("[简体中文](./README.md) | English", english)
         for required in (
-            "Codex Multi Relay",
+            "Multi Relay",
             "deepseek-v4-pro",
             "multi_agent_v2",
             'fork_turns="none"',

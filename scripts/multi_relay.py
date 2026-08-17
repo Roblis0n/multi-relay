@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stable command entrypoint for Codex Multi Relay management."""
+"""Stable command entrypoint for Multi Relay management."""
 
 from multi_relay.cli import main
 

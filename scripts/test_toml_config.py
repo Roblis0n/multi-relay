@@ -122,7 +122,7 @@ class TomlConfigTests(unittest.TestCase):
             ["helper.py", "--provider", "local-gateway"],
         )
         self.assertEqual(seen, [("local-gateway", True)])
-        self.assertEqual(rendered.count("# BEGIN CODEX-MULTI-RELAY PROVIDERS"), 1)
+        self.assertEqual(rendered.count("# BEGIN MULTI-RELAY PROVIDERS"), 1)
 
     def test_responses_vault_auth_uses_helper_without_starting_bridge(self) -> None:
         payload = self.multi_catalog().to_dict()
@@ -319,7 +319,7 @@ class TomlConfigTests(unittest.TestCase):
         second = apply_codex_config(first, self.auth_command)
 
         self.assertEqual(second, first)
-        self.assertEqual(first.count("# BEGIN CODEX-DEEPSEEK-FANOUT PROVIDER"), 1)
+        self.assertEqual(first.count("# BEGIN MULTI-RELAY PROVIDERS"), 1)
 
     def test_apply_updates_quoted_tables_without_duplicate_tables(self) -> None:
         original = (
