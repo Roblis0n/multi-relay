@@ -10,15 +10,19 @@ jobs:
       fail-fast: false
       matrix:
         os:
+          - ubuntu-latest
           - macos-latest
           - windows-latest
+        python:
+          - "3.11"
+          - "3.12"
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - name: Run all manager and skill tests
         run: python -m unittest discover -s scripts -p "test_*.py" -v
       - name: Compile complete Python package
@@ -27,3 +31,7 @@ jobs:
         run: python -m json.tool evals/evals.json
       - name: Reject legacy configuration writes
         run: python scripts/check_runtime_contract.py
+      - name: Validate the offline Codex bridge contract
+        run: python scripts/check_codex_bridge_runtime.py
+      - name: Validate the public architecture contract
+        run: python scripts/check_public_contract.py

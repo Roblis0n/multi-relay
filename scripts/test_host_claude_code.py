@@ -57,6 +57,9 @@ class ClaudeCodeHostAdapterTests(unittest.TestCase):
         self.assertIn('model: "multi-relay-agent-default"', rendered)
         self.assertIn('tools: ["Read", "Bash"]', rendered)
         self.assertTrue(rendered.endswith("Do the bounded task.\nKeep evidence.\n"))
+        self.assertNotIn("ANTHROPIC_API_KEY", rendered)
+        self.assertNotIn("x-api-key", rendered)
+        self.assertNotIn("Authorization", rendered)
 
     def test_user_and_project_scopes_choose_exact_agent_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

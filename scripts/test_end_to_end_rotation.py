@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
@@ -26,6 +30,7 @@ from multi_relay.gateway import (  # noqa: E402
     GatewayApplication,
     GatewayCancelled,
     GatewayExhausted,
+    HttpAttemptExecutor,
 )
 from multi_relay.protocols.base import ProviderErrorMetadata  # noqa: E402
 from multi_relay.rotation import RotationController  # noqa: E402
@@ -168,6 +173,182 @@ class ScriptedExecutor:
         if callable(selected):
             return selected()
         return selected
+
+
+class ScriptedHTTPServer(ThreadingHTTPServer):
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), ScriptedHTTPHandler)
+        self.scripts: dict[str, list[dict[str, object]]] = {}
+        self.requests: list[dict[str, object]] = []
+
+    @property
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{self.server_address[1]}"
+
+
+class ScriptedHTTPHandler(BaseHTTPRequestHandler):
+    server: ScriptedHTTPServer
+
+    def log_message(self, format: str, *args: object) -> None:
+        del format, args
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("content-length", "0"))
+        raw_request = self.rfile.read(length)
+        try:
+            payload = json.loads(raw_request.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = None
+        self.server.requests.append(
+            {
+                "path": self.path,
+                "headers": {key.casefold(): value for key, value in self.headers.items()},
+                "payload": payload,
+            }
+        )
+        actions = self.server.scripts.get(self.path, [])
+        if not actions:
+            action: dict[str, object] = {
+                "status": 500,
+                "payload": {"error": {"type": "fixture_exhausted"}},
+            }
+        else:
+            action = actions.pop(0)
+        delay = action.get("delay", 0)
+        if isinstance(delay, (int, float)) and delay > 0:
+            time.sleep(float(delay))
+        status = action.get("status", 200)
+        assert isinstance(status, int)
+        headers = action.get("headers", {})
+        assert isinstance(headers, dict)
+        raw = action.get("raw")
+        if raw is None:
+            raw = json.dumps(action.get("payload", {}), separators=(",", ":")).encode()
+        elif isinstance(raw, str):
+            raw = raw.encode()
+        assert isinstance(raw, bytes)
+        content_type = str(action.get("content_type", "application/json"))
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        for key, value in headers.items():
+            self.send_header(str(key), str(value))
+        if action.get("disconnect"):
+            self.end_headers()
+            prefix = action.get("prefix", raw)
+            if isinstance(prefix, str):
+                prefix = prefix.encode()
+            if isinstance(prefix, bytes):
+                self.wfile.write(prefix)
+                self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+def http_gateway_catalog(
+    base_url: str,
+    *,
+    order: tuple[str, ...],
+    strategy: str = "sticky",
+    duration_seconds: int | None = None,
+) -> Catalog:
+    payload = default_catalog().to_dict()
+    native_provider = next(item for item in payload["providers"] if item["id"] == "codex")
+    native_target = next(item for item in payload["targets"] if item["id"] == "codex-native")
+    payload["providers"] = [
+        {
+            "id": "chat",
+            "name": "Chat fixture",
+            "protocol": "deepseek-chat",
+            "base_url": f"{base_url}/chat",
+            "auth_mode": "vault",
+            "capabilities": ["text", "tool_calling"],
+            "models_endpoint": "/models",
+            "enabled": True,
+        },
+        {
+            "id": "anthropic",
+            "name": "Messages fixture",
+            "protocol": "anthropic-messages",
+            "base_url": f"{base_url}/anthropic",
+            "auth_mode": "vault",
+            "capabilities": ["text", "tool_calling"],
+            "models_endpoint": "/models",
+            "enabled": True,
+        },
+        {
+            "id": "responses",
+            "name": "Responses fixture",
+            "protocol": "responses-compatible",
+            "base_url": f"{base_url}/openai",
+            "auth_mode": "vault",
+            "capabilities": ["text", "vision", "tool_calling"],
+            "models_endpoint": "/models",
+            "enabled": True,
+        },
+        native_provider,
+    ]
+    payload["credentials"] = [
+        {
+            "id": f"{provider}-fixture",
+            "provider_id": provider,
+            "vault_target": f"multi-relay/{provider}/fixture",
+            "enabled": True,
+            "created_at": "2026-08-16T00:00:00Z",
+            "label": f"{provider.title()} fixture",
+        }
+        for provider in ("chat", "anthropic", "responses")
+    ]
+    capabilities = {
+        "chat-a": ["text", "tool_calling"],
+        "anthropic-b": ["text", "tool_calling"],
+        "responses-c": ["text", "vision", "tool_calling"],
+    }
+    providers = {
+        "chat-a": ("chat", "chat-fixture", "chat-model"),
+        "anthropic-b": ("anthropic", "anthropic-fixture", "messages-model"),
+        "responses-c": ("responses", "responses-fixture", "responses-model"),
+    }
+    targets = []
+    for target_id, (provider_id, credential_id, model) in providers.items():
+        targets.append(
+            {
+                "id": target_id,
+                "provider_id": provider_id,
+                "protocol": None,
+                "model": model,
+                "credential_id": credential_id,
+                "capabilities": capabilities[target_id],
+                "context_window": 200000,
+                "max_output_tokens": 8192,
+                "reasoning_efforts": [],
+                "trust": "standard",
+                "host_compatibility": ["codex", "claude-code"],
+                "enabled": True,
+                "metadata": {},
+            }
+        )
+    payload["targets"] = [*targets, native_target]
+    general = next(item for item in payload["pools"] if item["id"] == "general")
+    general.update(
+        {
+            "targets": list(order),
+            "strategy": strategy,
+            "duration_seconds": duration_seconds,
+            "max_rate_limit_wait_seconds": 3,
+            "cooldown": {
+                "quota_seconds": 30,
+                "rate_limit_seconds": 10,
+                "auth_seconds": 60,
+                "provider_seconds": 5,
+            },
+        }
+    )
+    payload["hosts"]["claude-code"]["enabled"] = True
+    return Catalog.from_dict(payload)
 
 
 class GatewayRotationTests(unittest.TestCase):
@@ -416,6 +597,273 @@ class GatewayRotationTests(unittest.TestCase):
         state = app.rotation.store.load(app.rotation.catalog_hash)
         self.assertEqual(state.pools["general"].active_target_id, "target-a")
         self.assertEqual(dict(state.pools["general"].targets), {})
+
+
+class LocalProtocolUpstreamTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.server = ScriptedHTTPServer()
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def app(
+        self,
+        order: tuple[str, ...],
+        *,
+        strategy: str = "sticky",
+        duration_seconds: int | None = None,
+    ) -> GatewayApplication:
+        catalog = http_gateway_catalog(
+            self.server.base_url,
+            order=order,
+            strategy=strategy,
+            duration_seconds=duration_seconds,
+        )
+        rotation = RotationController(
+            catalog,
+            RuntimeStateStore(self.root / "runtime.json"),
+            clock=FakeClock(),
+            random_source=FixedRandom(),
+            credential_available=lambda reference: reference.enabled,
+        )
+        return GatewayApplication(
+            catalog,
+            rotation=rotation,
+            credential_reader=lambda reference, protocol: (
+                f"fixture-{reference.id}-{protocol}"
+            ),
+            attempt_executor=HttpAttemptExecutor(catalog, timeout=2),
+            request_token="local-session-token",
+            shutdown_token="shutdown-only-token",
+            sleep=lambda seconds: None,
+        )
+
+    @staticmethod
+    def chat_success(text: str = "chat ok") -> dict[str, object]:
+        return {
+            "payload": {
+                "id": "chat-result",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": text},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+            }
+        }
+
+    @staticmethod
+    def messages_success(text: str = "messages ok") -> dict[str, object]:
+        return {
+            "payload": {
+                "id": "messages-result",
+                "type": "message",
+                "role": "assistant",
+                "model": "messages-model",
+                "content": [{"type": "text", "text": text}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 2},
+            }
+        }
+
+    @staticmethod
+    def responses_success(text: str = "responses ok") -> dict[str, object]:
+        return {
+            "payload": {
+                "id": "responses-result",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+            }
+        }
+
+    @staticmethod
+    def responses_request(**extra: object) -> dict[str, object]:
+        return {
+            "model": "multi-relay-general",
+            "input": "hello",
+            "max_output_tokens": 64,
+            "stream": False,
+            **extra,
+        }
+
+    @staticmethod
+    def messages_request(**extra: object) -> dict[str, object]:
+        return {
+            "model": "multi-relay-general",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 64,
+            "stream": False,
+            **extra,
+        }
+
+    @staticmethod
+    def execute(app: GatewayApplication, surface: str, payload: dict[str, object]):
+        headers = {"authorization": "Bearer local-session-token"}
+        if surface == "messages":
+            headers["anthropic-version"] = "2023-06-01"
+        execution = app.prepare_execution(
+            surface,
+            payload,
+            headers=headers,
+            request_id=f"fixture-{surface}",
+        )
+        events = list(execution)
+        return execution, events
+
+    def paths(self) -> list[str]:
+        return [str(item["path"]) for item in self.server.requests]
+
+    def test_codex_responses_to_chat_completions(self) -> None:
+        self.server.scripts["/chat/chat/completions"] = [self.chat_success()]
+        app = self.app(("chat-a", "anthropic-b"))
+
+        _, events = self.execute(app, "responses", self.responses_request())
+
+        self.assertEqual(self.paths(), ["/chat/chat/completions"])
+        self.assertEqual(events[-1].kind, EventKind.RESPONSE_COMPLETED)
+        request = self.server.requests[0]
+        self.assertEqual(request["headers"]["authorization"], "Bearer fixture-chat-fixture-deepseek-chat")
+        self.assertEqual(request["payload"]["model"], "chat-model")
+
+    def test_codex_quota_rotates_to_anthropic_and_sticks_without_secret_leak(self) -> None:
+        self.server.scripts["/chat/chat/completions"] = [
+            {"status": 402, "payload": {"error": {"code": "insufficient_quota"}}}
+        ]
+        self.server.scripts["/anthropic/messages"] = [
+            self.messages_success("first"),
+            self.messages_success("second"),
+        ]
+        app = self.app(("chat-a", "anthropic-b"))
+
+        first, _ = self.execute(app, "responses", self.responses_request())
+        second, _ = self.execute(app, "responses", self.responses_request())
+
+        self.assertEqual(
+            self.paths(),
+            ["/chat/chat/completions", "/anthropic/messages", "/anthropic/messages"],
+        )
+        self.assertEqual(
+            self.server.requests[1]["headers"]["x-api-key"],
+            "fixture-anthropic-fixture-anthropic-messages",
+        )
+        serialized = json.dumps(
+            {
+                "first": first.attempts,
+                "second": second.attempts,
+                "state": json.loads((self.root / "runtime.json").read_text(encoding="utf-8")),
+            }
+        )
+        self.assertNotIn("fixture-chat-fixture-deepseek-chat", serialized)
+        self.assertNotIn("fixture-anthropic-fixture-anthropic-messages", serialized)
+
+    def test_claude_messages_to_anthropic(self) -> None:
+        self.server.scripts["/anthropic/messages"] = [self.messages_success()]
+        app = self.app(("anthropic-b", "chat-a"))
+
+        _, events = self.execute(app, "messages", self.messages_request())
+
+        self.assertEqual(self.paths(), ["/anthropic/messages"])
+        self.assertEqual(events[-1].kind, EventKind.RESPONSE_COMPLETED)
+
+    def test_claude_rate_limit_rotates_to_responses(self) -> None:
+        self.server.scripts["/anthropic/messages"] = [
+            {
+                "status": 429,
+                "headers": {"Retry-After": "30"},
+                "payload": {"type": "error", "error": {"type": "rate_limit_error"}},
+            }
+        ]
+        self.server.scripts["/openai/responses"] = [self.responses_success()]
+        app = self.app(("anthropic-b", "responses-c"))
+
+        _, events = self.execute(app, "messages", self.messages_request())
+
+        self.assertEqual(self.paths(), ["/anthropic/messages", "/openai/responses"])
+        self.assertEqual(events[-1].kind, EventKind.RESPONSE_COMPLETED)
+
+    def test_vision_filters_text_only_target(self) -> None:
+        self.server.scripts["/openai/responses"] = [self.responses_success()]
+        app = self.app(("chat-a", "responses-c"))
+        request = self.responses_request(
+            input=[
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "inspect"},
+                        {
+                            "type": "input_image",
+                            "image_url": "https://fixture.example/image.png",
+                        },
+                    ],
+                }
+            ]
+        )
+
+        self.execute(app, "responses", request)
+
+        self.assertEqual(self.paths(), ["/openai/responses"])
+
+    def test_tool_request_is_translated_for_chat_target(self) -> None:
+        self.server.scripts["/chat/chat/completions"] = [
+            {
+                "payload": {
+                    "id": "chat-tool-result",
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "lookup",
+                                            "arguments": "{\"q\":\"relay\"}",
+                                        },
+                                    }
+                                ],
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ],
+                }
+            }
+        ]
+        app = self.app(("chat-a",))
+        request = self.responses_request(
+            tools=[
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "description": "Look up a value.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                    },
+                }
+            ]
+        )
+
+        _, events = self.execute(app, "responses", request)
+
+        upstream = self.server.requests[0]["payload"]
+        self.assertEqual(upstream["tools"][0]["type"], "function")
+        self.assertTrue(any(event.kind is EventKind.TOOL_CALL_COMPLETED for event in events))
 
 
 if __name__ == "__main__":

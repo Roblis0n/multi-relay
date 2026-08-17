@@ -26,20 +26,34 @@ FORBIDDEN = (
     "X-Codex-DeepSeek-Bridge-Pid",
     "codex-deepseek-reasoning-v1",
     "codex-deepseek-api-key",
+    "Codex Multi Relay",
+    "codex-multi-relay",
+    "CODEX-MULTI-RELAY",
+    "codex-multi-relay-chat-bridge",
+    "X-Codex-Multi-Relay-Bridge-Pid",
+    "codex-multi-relay-reasoning-v1",
 )
 ALLOWED = {
     "migration.py": set(FORBIDDEN),
     "compatibility.py": {"model_catalog_json"},
     "paths.py": {"codex-deepseek-relay", "codex-deepseek-subagent"},
-    "branding.py": {"codex-deepseek-relay", "codex-deepseek-subagent"},
-    "instructions.py": {"CODEX-DEEPSEEK-FANOUT"},
-    "toml_config.py": {"CODEX-DEEPSEEK-FANOUT"},
-    "credentials.py": {"codex-deepseek-api-key"},
+    "branding.py": {
+        "codex-deepseek-relay",
+        "codex-deepseek-subagent",
+        "codex-multi-relay",
+    },
+    "instructions.py": {"CODEX-DEEPSEEK-FANOUT", "CODEX-MULTI-RELAY"},
+    "toml_config.py": {"CODEX-DEEPSEEK-FANOUT", "CODEX-MULTI-RELAY"},
+    "credentials.py": {"codex-deepseek-api-key", "codex-multi-relay"},
     "bridge.py": {
         "codex-deepseek-relay",
         "codex-deepseek-responses-bridge",
         "X-Codex-DeepSeek-Bridge-Pid",
         "codex-deepseek-reasoning-v1",
+        "codex-multi-relay",
+        "codex-multi-relay-chat-bridge",
+        "X-Codex-Multi-Relay-Bridge-Pid",
+        "codex-multi-relay-reasoning-v1",
     },
 }
 

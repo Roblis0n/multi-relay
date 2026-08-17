@@ -205,11 +205,22 @@ class GatewayHTTPTests(unittest.TestCase):
     def test_shutdown_token_is_independent_from_request_token(self) -> None:
         status, _, _ = self.request(
             "POST",
-            "/_shutdown",
+            "/_multi-relay/shutdown",
             body={},
             headers={"x-multi-relay-shutdown-token": "request-token"},
         )
         self.assertEqual(status, 403)
+        status, _, _ = self.request(
+            "POST",
+            "/_multi-relay/shutdown",
+            body={},
+            headers={"x-multi-relay-shutdown-token": "shutdown-token"},
+        )
+        self.assertEqual(status, 200)
+        self.thread.join(timeout=2)
+        self.assertFalse(self.thread.is_alive())
+
+    def test_legacy_shutdown_alias_remains_available(self) -> None:
         status, _, _ = self.request(
             "POST",
             "/_shutdown",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the installed Codex binary against the bridge without a real API key."""
+"""Check bridge contracts offline, with an opt-in installed-Codex smoke test."""
 
 from __future__ import annotations
 
@@ -693,10 +693,30 @@ def _thread_store_snapshot(home: Path) -> list[dict[str, object]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--codex-bin", required=True)
+    parser = argparse.ArgumentParser(
+        description="Run the offline bridge contract, or pass --codex-bin for a live host smoke test."
+    )
+    parser.add_argument("--codex-bin")
     parser.add_argument("--debug-thread-store", action="store_true")
     args = parser.parse_args(argv)
+    if args.codex_bin is None:
+        expected = {
+            "BRIDGE_SERVICE": "multi-relay-chat-bridge",
+            "FORMER_BRIDGE_SERVICE": "codex-multi-relay-chat-bridge",
+            "LEGACY_BRIDGE_SERVICE": "codex-deepseek-responses-bridge",
+        }
+        mismatches = {
+            name: getattr(bridge_module, name, None)
+            for name, value in expected.items()
+            if getattr(bridge_module, name, None) != value
+        }
+        if mismatches or bridge_module.BRIDGE_VERSION < 3:
+            print("codex bridge runtime: offline compatibility contract failed")
+            if mismatches:
+                print(json.dumps(mismatches, sort_keys=True))
+            return 1
+        print("codex bridge runtime: offline contract ok; live Codex smoke not requested")
+        return 0
     codex_bin = Path(args.codex_bin).expanduser().resolve()
     if not codex_bin.is_file():
         print("codex bridge runtime: codex binary missing")

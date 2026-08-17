@@ -67,6 +67,10 @@ class CodexHostAdapterTests(unittest.TestCase):
             )
             self.assertNotIn("model", reviewer)
             self.assertNotIn("model_provider", reviewer)
+            managed_text = "\n".join(value.decode("utf-8") for value in plan.files.values())
+            self.assertNotIn("ANTHROPIC_API_KEY", managed_text)
+            self.assertNotIn("Authorization =", managed_text)
+            self.assertNotIn("x-api-key", managed_text)
 
     def test_apply_is_idempotent_and_disable_removes_active_provider(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
