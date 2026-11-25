@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any, Callable, Mapping
 from ..catalog import Catalog
 from ..credentials import gateway_auth_command
 from ..errors import ManagerError
+from ..hashing import sha256_hex as _sha256
 from ..instructions import (
     INSTRUCTIONS_BEGIN,
     LEGACY_INSTRUCTION_MARKERS,
@@ -31,10 +31,6 @@ from . import HostPlan
 
 
 HOST_MANIFEST_SCHEMA = 1
-
-
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _read_bytes(path: Path) -> bytes:

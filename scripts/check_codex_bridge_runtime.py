@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.error
+import urllib.request
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -52,11 +54,11 @@ _ORIGINAL_BUILD_CHAT_REQUEST = bridge_module.build_chat_request
 
 def _capture_codex_request(
     body: dict[str, object],
-    *,
-    reasoning_secret: str | None = None,
+    *args: object,
+    **kwargs: object,
 ):
     _CODEX_REQUESTS.append(body)
-    return _ORIGINAL_BUILD_CHAT_REQUEST(body, reasoning_secret=reasoning_secret)
+    return _ORIGINAL_BUILD_CHAT_REQUEST(body, *args, **kwargs)
 
 
 bridge_module.build_chat_request = _capture_codex_request
@@ -692,6 +694,118 @@ def _thread_store_snapshot(home: Path) -> list[dict[str, object]]:
     return snapshots
 
 
+_OFFLINE_AUTHORIZATION = "Bearer sk-runtime-fixture"
+
+
+def _post_responses(bridge_port: int, payload: dict[str, object]) -> tuple[int, str]:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{bridge_port}/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": _OFFLINE_AUTHORIZATION,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode("utf-8", "replace")
+
+
+def _run_offline_bridge_contract() -> int:
+    """Drive the real bridge server over loopback HTTP against the fixture.
+
+    Two Responses requests reproduce the Codex tool loop without a Codex
+    binary: the first must come back as a function_call, the second (with
+    the function_call_output) must surface the fixture's final token, and
+    both upstream captures must carry the caller's Authorization unchanged.
+    """
+
+    def fail(reason: str) -> int:
+        print(f"codex bridge runtime: offline bridge contract failed: {reason}")
+        return 1
+
+    tools = [{
+        "type": "function",
+        "name": "shell_command",
+        "description": "Run a shell command.",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+        },
+    }]
+    prompt = f"Reply exactly {TOKEN} and nothing else."
+    with _DeepSeekFixture.lock:
+        _DeepSeekFixture.captured.clear()
+        _DeepSeekFixture.authorizations.clear()
+        _DeepSeekFixture.scenario = "tool"
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), _DeepSeekFixture)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    bridge = _BridgeServer(
+        ("127.0.0.1", 0),
+        f"http://127.0.0.1:{upstream.server_address[1]}/chat/completions",
+    )
+    threading.Thread(target=bridge.serve_forever, daemon=True).start()
+    try:
+        bridge_port = bridge.server_address[1]
+        status, body = _post_responses(bridge_port, {
+            "model": "deepseek-v4-pro",
+            "input": [{"role": "user", "content": prompt}],
+            "tools": tools,
+            "stream": True,
+        })
+        if status != 200:
+            return fail(f"first request returned HTTP {status}")
+        if "function_call" not in body:
+            return fail("first response did not contain a function_call item")
+        if len(_DeepSeekFixture.captured) != 1:
+            return fail("fixture did not capture exactly one upstream request")
+        first = _DeepSeekFixture.captured[0]
+        if first.get("model") != "deepseek-v4-pro" or "messages" not in first:
+            return fail("first upstream payload was not translated to chat shape")
+        if _DeepSeekFixture.authorizations != [_OFFLINE_AUTHORIZATION]:
+            return fail("first upstream Authorization was not forwarded unchanged")
+        status, body = _post_responses(bridge_port, {
+            "model": "deepseek-v4-pro",
+            "input": [
+                {"role": "user", "content": prompt},
+                {
+                    "type": "function_call",
+                    "call_id": "call_runtime_fixture",
+                    "name": "shell_command",
+                    "arguments": json.dumps({"command": "Write-Output CODEX_BRIDGE_TOOL_OK"}),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_runtime_fixture",
+                    "output": "CODEX_BRIDGE_TOOL_OK",
+                },
+            ],
+            "tools": tools,
+            "stream": True,
+        })
+        if status != 200:
+            return fail(f"second request returned HTTP {status}")
+        if TOKEN not in body:
+            return fail("second response did not contain the fixture token")
+        if len(_DeepSeekFixture.captured) != 2:
+            return fail("fixture did not capture both upstream requests")
+        messages = _DeepSeekFixture.captured[1].get("messages")
+        if not isinstance(messages, list) or not any(
+            isinstance(message, dict) and message.get("role") == "tool"
+            for message in messages
+        ):
+            return fail("second upstream payload had no tool-role message")
+        if _DeepSeekFixture.authorizations != [_OFFLINE_AUTHORIZATION] * 2:
+            return fail("second upstream Authorization was not forwarded unchanged")
+        return 0
+    finally:
+        bridge.shutdown()
+        upstream.shutdown()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run the offline bridge contract, or pass --codex-bin for a live host smoke test."
@@ -714,6 +828,8 @@ def main(argv: list[str] | None = None) -> int:
             print("codex bridge runtime: offline compatibility contract failed")
             if mismatches:
                 print(json.dumps(mismatches, sort_keys=True))
+            return 1
+        if _run_offline_bridge_contract() != 0:
             return 1
         print("codex bridge runtime: offline contract ok; live Codex smoke not requested")
         return 0

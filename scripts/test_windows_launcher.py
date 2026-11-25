@@ -15,8 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = PROJECT_ROOT / "configure-multi-relay.cmd"
 
 
-@unittest.skipUnless(os.name == "nt", "Windows launcher test")
 class WindowsLauncherTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows launcher test")
     def test_launcher_uses_working_python_command_and_reaches_setup_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

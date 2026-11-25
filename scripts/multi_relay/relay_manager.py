@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
@@ -38,6 +37,7 @@ from .credentials import (
 )
 from .errors import ManagerError
 from .gateway import GATEWAY_BASE_URL, GatewayController, load_gateway_state
+from .hashing import sha256_hex as _sha256
 from .instructions import (
     INSTRUCTIONS_BEGIN,
     INSTRUCTIONS_END,
@@ -90,10 +90,6 @@ _FULL_ACCEPTANCE_CHECKS = {
     "child_metadata_passed",
     "parent_unchanged",
 }
-
-
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _outcome(

@@ -79,22 +79,6 @@ class ChangePlan:
             details=details,
         )
 
-    def to_install_plan(
-        self,
-        *,
-        manifest: dict[str, Any] | None,
-        backup_dir: Path,
-        preconditions: Mapping[Path, str] | None = None,
-    ) -> InstallPlan:
-        return InstallPlan(
-            files=dict(self.files),
-            removals=self.removals,
-            manifest=manifest,
-            backup_dir=backup_dir,
-            preconditions=dict(preconditions or {}),
-        )
-
-
 @dataclass(frozen=True)
 class FileSnapshot:
     path: Path

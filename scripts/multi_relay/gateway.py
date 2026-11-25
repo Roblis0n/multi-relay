@@ -774,7 +774,15 @@ class GatewayApplication:
 
 
 class _RejectRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         raise urllib.error.HTTPError(req.full_url, code, "Redirect blocked", headers, fp)
 
 

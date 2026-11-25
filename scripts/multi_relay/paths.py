@@ -48,10 +48,6 @@ class Paths:
         return (self.codex_state_dir, self.relay_state_dir, self.legacy_state_dir)
 
     @property
-    def legacy_manifests(self) -> tuple[Path, ...]:
-        return tuple(path / "manifest.json" for path in self.legacy_state_dirs)
-
-    @property
     def codex_host_manifest(self) -> Path:
         """Ownership snapshot for the Codex host adapter."""
 

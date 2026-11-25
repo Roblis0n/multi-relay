@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -15,6 +14,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ..catalog import AgentProfile, Catalog, save_catalog_bytes
 from ..errors import ManagerError
 from ..gateway import GatewayController
+from ..hashing import sha256_hex as _sha256
 from ..paths import Paths, resolve_paths
 from ..transaction import InstallPlan, execute_install_plan
 from . import HostPlan
@@ -32,10 +32,6 @@ _BYPASS_ENVIRONMENT = frozenset(
         "CLAUDE_CODE_USE_FOUNDRY",
     }
 )
-
-
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _yaml_string(value: str) -> str:

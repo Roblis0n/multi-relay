@@ -370,5 +370,115 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(locator.target, "multi-relay/local-gateway/session")
 
 
+class CredentialHelperFailureTests(unittest.TestCase):
+    """The helper's fail-closed branches: on any error it must return the
+    documented code and print nothing, so a caller can never mistake a
+    failure for a credential."""
+
+    def _run(self, argv: list[str], patches: list[mock._patch]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        for patcher in patches:
+            patcher.start()
+        try:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                code = credential_helper.main(argv)
+        finally:
+            for patcher in patches:
+                patcher.stop()
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_missing_provider_credential_returns_3(self) -> None:
+        store = mock.Mock()
+        store.read.return_value = None
+        code, out, err = self._run(
+            ["--provider", "vendor", "--no-start-bridge"],
+            [mock.patch.object(credential_helper, "credential_store", return_value=store)],
+        )
+        self.assertEqual((code, out, err), (3, "", ""))
+
+    def test_empty_provider_credential_returns_3(self) -> None:
+        store = mock.Mock()
+        store.read.return_value = ""
+        code, out, err = self._run(
+            ["--provider", "vendor", "--no-start-bridge"],
+            [mock.patch.object(credential_helper, "credential_store", return_value=store)],
+        )
+        self.assertEqual((code, out, err), (3, "", ""))
+
+    def test_store_factory_error_returns_2(self) -> None:
+        code, out, err = self._run(
+            ["--provider", "vendor", "--no-start-bridge"],
+            [mock.patch.object(
+                credential_helper, "credential_store", side_effect=RuntimeError("vault down")
+            )],
+        )
+        self.assertEqual((code, out, err), (2, "", ""))
+
+    def test_store_read_error_returns_2(self) -> None:
+        store = mock.Mock()
+        store.read.side_effect = RuntimeError("vault down")
+        code, out, err = self._run(
+            ["--provider", "vendor", "--no-start-bridge"],
+            [mock.patch.object(credential_helper, "credential_store", return_value=store)],
+        )
+        self.assertEqual((code, out, err), (2, "", ""))
+
+    def test_gateway_missing_token_returns_3(self) -> None:
+        local_store = mock.Mock()
+        local_store.read.return_value = None
+        code, out, err = self._run(
+            ["--gateway"],
+            [
+                mock.patch.object(credential_helper, "ensure_bridge"),
+                mock.patch.object(
+                    credential_helper,
+                    "local_gateway_credential_store",
+                    return_value=local_store,
+                ),
+            ],
+        )
+        self.assertEqual((code, out, err), (3, "", ""))
+
+    def test_gateway_read_error_returns_2(self) -> None:
+        local_store = mock.Mock()
+        local_store.read.side_effect = RuntimeError("vault down")
+        code, out, err = self._run(
+            ["--gateway"],
+            [
+                mock.patch.object(credential_helper, "ensure_bridge"),
+                mock.patch.object(
+                    credential_helper,
+                    "local_gateway_credential_store",
+                    return_value=local_store,
+                ),
+            ],
+        )
+        self.assertEqual((code, out, err), (2, "", ""))
+
+    def test_gateway_bridge_failure_returns_4_without_reading_token(self) -> None:
+        local_store = mock.Mock()
+        code, out, err = self._run(
+            ["--gateway"],
+            [
+                mock.patch.object(
+                    credential_helper, "ensure_bridge", side_effect=OSError("no bridge")
+                ),
+                mock.patch.object(
+                    credential_helper,
+                    "local_gateway_credential_store",
+                    return_value=local_store,
+                ),
+            ],
+        )
+        self.assertEqual((code, out, err), (4, "", ""))
+        local_store.read.assert_not_called()
+
+    def test_unknown_argument_returns_2_and_prints_no_secret(self) -> None:
+        code, out, _err = self._run(["--bogus"], [])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -591,23 +591,6 @@ class RotationController:
         self._forget_hold(pool_id)
         return reset
 
-    def jittered_delay(
-        self,
-        base_seconds: float,
-        *,
-        jitter_ratio: float = 0.2,
-    ) -> float:
-        """Return an injectable deterministic retry delay for later attempt loops."""
-
-        if not math.isfinite(base_seconds) or base_seconds < 0:
-            raise ManagerError("invalid_retry_delay", "Retry delay must be finite and non-negative.")
-        if not math.isfinite(jitter_ratio) or not 0 <= jitter_ratio <= 1:
-            raise ManagerError("invalid_retry_delay", "Jitter ratio must be between zero and one.")
-        sample = self.random_source.random()
-        if not math.isfinite(sample) or not 0 <= sample <= 1:
-            raise ManagerError("invalid_random_source", "Random source must return a value from zero to one.")
-        return base_seconds * (1 - jitter_ratio + (2 * jitter_ratio * sample))
-
 
 __all__ = [
     "Clock",
